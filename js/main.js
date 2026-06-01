@@ -56,10 +56,7 @@ function doRoll() {
 function showGame(game) {
   const view = $('view');
   view.scrollTop = 0;
-  getDetail(game).then((d) => {
-    const hero = renderProfile(view, game, d);
-    wireSwipe(hero, game);
-  });
+  getDetail(game).then((d) => renderProfile(view, game, d));
   $('rollBtn').textContent = '↻ Roll again';
   $('acceptBtn').hidden = false;
 }
@@ -69,39 +66,6 @@ function accept(game) {
   pushHistory(game.id, 'accepted');
   current = game;
   toast(`Tonight: ${game.title} 🎮`);
-}
-
-// horizontal swipe on the hero art: right = play, left = reroll. Vertical scrolls.
-function wireSwipe(hero, game) {
-  let startX = 0, startY = 0, dx = 0, active = false, axis = '';
-  const yes = hero.querySelector('.verdict.yes');
-  const no = hero.querySelector('.verdict.no');
-  const reset = () => { hero.style.transition = 'transform .2s'; hero.style.transform = ''; yes.style.opacity = 0; no.style.opacity = 0; };
-
-  hero.addEventListener('pointerdown', (e) => { startX = e.clientX; startY = e.clientY; active = true; axis = ''; hero.style.transition = 'none'; });
-  hero.addEventListener('pointermove', (e) => {
-    if (!active) return;
-    const ddx = e.clientX - startX, ddy = e.clientY - startY;
-    if (!axis) {
-      if (Math.abs(ddx) < 8 && Math.abs(ddy) < 8) return;
-      axis = Math.abs(ddx) > Math.abs(ddy) ? 'x' : 'y';
-      if (axis === 'y') { active = false; return; }
-      hero.setPointerCapture(e.pointerId);
-    }
-    dx = ddx;
-    hero.style.transform = `translateX(${dx}px) rotate(${dx * 0.025}deg)`;
-    yes.style.opacity = dx > 0 ? Math.min(1, dx / 120) : 0;
-    no.style.opacity = dx < 0 ? Math.min(1, -dx / 120) : 0;
-  });
-  const end = () => {
-    if (axis !== 'x') { active = false; reset(); return; }
-    active = false;
-    const decided = dx; dx = 0; reset();
-    if (decided > 110) accept(game);
-    else if (decided < -110) doRoll();
-  };
-  hero.addEventListener('pointerup', end);
-  hero.addEventListener('pointercancel', end);
 }
 
 // ---------- toast ----------

@@ -3,32 +3,17 @@ import { coverUrl, snapUrl, titleUrl } from '../data.js';
 import { pretty, TIME_LABELS, el } from '../util.js';
 
 const PLATFORM_LABELS = { n64: 'Nintendo 64' };
+let _stopCarousel = null; // tears down the previous game's auto-advance timer
 
 export function renderProfile(container, game, detail) {
+  if (_stopCarousel) { _stopCarousel(); _stopCarousel = null; }
   container.innerHTML = '';
   const d = detail || {};
   const wrap = el('div', { class: 'profile' });
 
-  // --- hero: art shown CONTAINED over a blurred backdrop (no ugly crop) ---
+  // --- hero: art carousel (contained over a blurred backdrop) ---
   const hero = el('div', { class: 'pf-hero' });
-  const bg = el('div', { class: 'pf-bg' });
-  hero.append(bg);
-  const carousel = el('div', { class: 'carousel' });
-  const urls = [coverUrl(game.platform, game.cover), snapUrl(game.platform, game.cover), titleUrl(game.platform, game.cover)].filter(Boolean);
-  if (urls.length) {
-    urls.forEach((u, i) => {
-      const img = new Image();
-      img.className = 'shot';
-      img.src = u;
-      img.onerror = () => img.remove();
-      if (i === 0) img.onload = () => { bg.style.backgroundImage = `url("${u}")`; };
-      carousel.append(img);
-    });
-  } else {
-    carousel.append(el('div', { class: 'art-fallback' }, el('span', {}, game.title)));
-  }
-  hero.append(carousel);
-  hero.insertAdjacentHTML('beforeend', '<div class="verdict yes">PLAY</div><div class="verdict no">SKIP</div>');
+  _stopCarousel = buildCarousel(hero, game);
   wrap.append(hero);
 
   // --- details ---
@@ -64,5 +49,57 @@ export function renderProfile(container, game, detail) {
 
   wrap.append(pad);
   container.append(wrap);
-  return hero; // main wires swipe gestures onto this element
+}
+
+// Art carousel with page dots + gentle auto-advance. Images that 404 drop out
+// (the dot count follows the images that actually load). Returns a stop() fn.
+function buildCarousel(hero, game) {
+  const bg = el('div', { class: 'pf-bg' });
+  const carousel = el('div', { class: 'carousel' });
+  const dots = el('div', { class: 'dots' });
+  const urls = [coverUrl(game.platform, game.cover), snapUrl(game.platform, game.cover), titleUrl(game.platform, game.cover)].filter(Boolean);
+
+  if (!urls.length) {
+    carousel.append(el('div', { class: 'art-fallback' }, el('span', {}, game.title)));
+    hero.append(bg, carousel);
+    return () => {};
+  }
+
+  urls.forEach((u, i) => {
+    const img = new Image();
+    img.className = 'shot';
+    img.src = u;
+    img.onload = () => { if (i === 0 || !bg.style.backgroundImage) bg.style.backgroundImage = `url("${u}")`; refresh(); };
+    img.onerror = () => { img.remove(); refresh(); };
+    carousel.append(img);
+  });
+  hero.append(bg, carousel, dots);
+
+  let lastInteract = 0;
+  const count = () => carousel.querySelectorAll('.shot').length;
+  const current = () => Math.round(carousel.scrollLeft / (carousel.clientWidth || 1));
+  const go = (i) => carousel.scrollTo({ left: i * carousel.clientWidth, behavior: 'smooth' });
+
+  const updateActive = () => { const c = current(); [...dots.children].forEach((d, i) => d.classList.toggle('on', i === c)); };
+  function refresh() {
+    const n = count();
+    dots.innerHTML = '';
+    if (n <= 1) return; // a single image needs no pager
+    for (let i = 0; i < n; i++) {
+      const dot = el('span', { class: 'dot' });
+      dot.addEventListener('click', () => { go(i); lastInteract = Date.now(); });
+      dots.append(dot);
+    }
+    updateActive();
+  }
+  carousel.addEventListener('scroll', updateActive, { passive: true });
+  carousel.addEventListener('pointerdown', () => { lastInteract = Date.now(); }, { passive: true });
+
+  const timer = setInterval(() => {
+    const n = count();
+    if (n < 2 || Date.now() - lastInteract < 4500) return; // pause briefly after manual interaction
+    go((current() + 1) % n);
+  }, 3000);
+
+  return () => clearInterval(timer);
 }
