@@ -8,43 +8,42 @@
   <link rel="stylesheet" href="css/app.css" />
 </head>
 <body>
-  <!-- top bar -->
   <header class="topbar">
     <div class="brand">Next<span>Game</span></div>
-    <button id="resetBtn" class="ghost-btn" title="Reset everything">reset</button>
+    <div class="topbar-right">
+      <div class="pool"><b id="poolCount">—</b> in pool</div>
+      <button id="resetBtn" class="ghost-btn" title="Reset everything">reset</button>
+    </div>
   </header>
 
-  <!-- console toggles: horizontal scroller -->
   <nav class="consoles" aria-label="Consoles">
     <div id="consoleChips" class="chip-scroller"></div>
   </nav>
 
-  <!-- time-budget quick chips -->
   <div id="timeChips" class="chip-row time-chips"></div>
-
-  <!-- active filter chips (removable) -->
   <div id="activeChips" class="chip-row active-chips" hidden></div>
 
-  <!-- main stage: the rolled game / empty prompt -->
+  <!-- the rolled game IS the main view (or the empty prompt before first roll) -->
   <main class="stage">
-    <div id="cardArea" class="card-area">
+    <div id="view" class="view">
       <div class="empty-prompt">
         <div class="empty-emoji">🎲</div>
         <p>Hit <b>Roll</b> to pick something to play.</p>
+        <p class="empty-sub">Swipe the game → to lock it in, ← to reroll.</p>
       </div>
     </div>
   </main>
 
-  <!-- hero controls anchored in the thumb zone -->
-  <div class="hero">
+  <!-- persistent control bar: the core loop lives here -->
+  <div class="hero" id="hero">
     <button id="filterBtn" class="hero-side" aria-label="Filters">
       <span class="ico">⚙</span><span id="filterDot" class="dot" hidden></span>
     </button>
     <button id="rollBtn" class="roll-btn">Roll</button>
-    <div class="match-wrap"><span id="matchCount" class="match-count">—</span><span class="match-label">in pool</span></div>
+    <button id="acceptBtn" class="act act-accept" hidden>✓ I'll play this</button>
   </div>
 
-  <!-- filter drawer -->
+  <!-- filter drawer (a legitimate sheet — it overlays the game and you return) -->
   <div id="drawerBackdrop" class="backdrop" hidden></div>
   <aside id="drawer" class="drawer" aria-label="Filters">
     <div class="drawer-grip"></div>
@@ -52,22 +51,11 @@
       <h2>Filters</h2>
       <button id="clearFilters" class="ghost-btn">clear all</button>
     </div>
-    <div class="drawer-body" id="drawerBody"><!-- populated by controls.js --></div>
+    <div class="drawer-body" id="drawerBody"></div>
     <div class="drawer-foot">
       <button id="applyFilters" class="roll-btn wide">Show <span id="drawerCount">—</span> games</button>
     </div>
   </aside>
-
-  <!-- profile bottom sheet -->
-  <div id="sheetBackdrop" class="backdrop" hidden></div>
-  <section id="sheet" class="sheet" aria-label="Game profile">
-    <div class="sheet-grip"></div>
-    <div id="sheetBody" class="sheet-body"><!-- populated by profile.js --></div>
-    <div class="sheet-actions">
-      <button id="rerollBtn" class="act act-reroll">↻ Roll again</button>
-      <button id="acceptBtn" class="act act-accept">✓ I'll play this</button>
-    </div>
-  </section>
 
   <script type="module" src="js/main.js"></script>
 </body>
