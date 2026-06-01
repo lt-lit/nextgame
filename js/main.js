@@ -10,6 +10,17 @@ import { el } from './util.js';
 
 const $ = (id) => document.getElementById(id);
 
+// Pin the app shell to the *actual* visible viewport. Mobile browsers leave a
+// gap under bottom-anchored UI when relying on dvh/vh (toolbar + gesture bar);
+// the Visual Viewport API gives the real visible height.
+function setAppHeight() {
+  const h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  if (h > 0) document.documentElement.style.setProperty('--app-h', h + 'px');
+}
+setAppHeight();
+addEventListener('resize', setAppHeight);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', setAppHeight);
+
 let slim = [];
 let pool = [];
 let current = null;
