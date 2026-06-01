@@ -1,0 +1,14 @@
+{
+  "generatedAt": "2026-06-01T19:13:02.151Z",
+  "note": "Prototype data. Sources: Wikidata + libretro-thumbnails + Wikipedia. No credentials used.",
+  "consoles": [
+    {
+      "id": "n64",
+      "label": "Nintendo 64",
+      "count": 413,
+      "index": "data/index/n64.json",
+      "detail": "data/detail/n64.json"
+    }
+  ],
+  "overlays": []
+}

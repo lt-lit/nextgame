@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#0e0f13" />
+  <title>NextGame</title>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <!-- top bar -->
+  <header class="topbar">
+    <div class="brand">Next<span>Game</span></div>
+    <button id="resetBtn" class="ghost-btn" title="Reset everything">reset</button>
+  </header>
+
+  <!-- console toggles: horizontal scroller -->
+  <nav class="consoles" aria-label="Consoles">
+    <div id="consoleChips" class="chip-scroller"></div>
+  </nav>
+
+  <!-- time-budget quick chips -->
+  <div id="timeChips" class="chip-row time-chips"></div>
+
+  <!-- active filter chips (removable) -->
+  <div id="activeChips" class="chip-row active-chips" hidden></div>
+
+  <!-- main stage: the rolled game / empty prompt -->
+  <main class="stage">
+    <div id="cardArea" class="card-area">
+      <div class="empty-prompt">
+        <div class="empty-emoji">🎲</div>
+        <p>Hit <b>Roll</b> to pick something to play.</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- hero controls anchored in the thumb zone -->
+  <div class="hero">
+    <button id="filterBtn" class="hero-side" aria-label="Filters">
+      <span class="ico">⚙</span><span id="filterDot" class="dot" hidden></span>
+    </button>
+    <button id="rollBtn" class="roll-btn">Roll</button>
+    <div class="match-wrap"><span id="matchCount" class="match-count">—</span><span class="match-label">in pool</span></div>
+  </div>
+
+  <!-- filter drawer -->
+  <div id="drawerBackdrop" class="backdrop" hidden></div>
+  <aside id="drawer" class="drawer" aria-label="Filters">
+    <div class="drawer-grip"></div>
+    <div class="drawer-head">
+      <h2>Filters</h2>
+      <button id="clearFilters" class="ghost-btn">clear all</button>
+    </div>
+    <div class="drawer-body" id="drawerBody"><!-- populated by controls.js --></div>
+    <div class="drawer-foot">
+      <button id="applyFilters" class="roll-btn wide">Show <span id="drawerCount">—</span> games</button>
+    </div>
+  </aside>
+
+  <!-- profile bottom sheet -->
+  <div id="sheetBackdrop" class="backdrop" hidden></div>
+  <section id="sheet" class="sheet" aria-label="Game profile">
+    <div class="sheet-grip"></div>
+    <div id="sheetBody" class="sheet-body"><!-- populated by profile.js --></div>
+    <div class="sheet-actions">
+      <button id="rerollBtn" class="act act-reroll">↻ Roll again</button>
+      <button id="acceptBtn" class="act act-accept">✓ I'll play this</button>
+    </div>
+  </section>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
