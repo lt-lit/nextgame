@@ -34,11 +34,14 @@ API responses are cached under `tools/.cache/` (gitignored), so re-runs are chea
 ### Known gaps in this first cut (honest, not bugs)
 
 - **Scores** — only ~3% of N64 titles carry a Metacritic score on Wikidata; the rest are `null`. Unrated games still pass the rating filter by default (design doc §7.3).
-- **Time-to-beat buckets** — HowLongToBeat blocks scraping, so `hltbBucket` is a transparent **genre-based placeholder** (flagged `~` in the UI), just enough to demo the time chips.
+- **Time-to-beat buckets** — HowLongToBeat blocks scraping, so `hltbBucket` is a transparent **genre-based placeholder** (flagged `~` in the UI). It's a minor, collapsed filter in the drawer.
 - **Cover art** — ~62% match against libretro; misses show a clean title placeholder.
 
-All of this is swappable: the app only reads the generated JSON, so the
-generator can be repointed at any free source without touching the app.
+These are being filled next (see design doc §5 / §10): a libretro blobless-clone for
+~95% art, Wikipedia "Reception" tables for real per-magazine review scores, and IGDB
+enrichment (one free build-time key) for screenshot galleries, trailers, and ratings.
+It's all swappable — the app only reads the generated JSON, so the generator can be
+repointed at any source without touching the app.
 
 ## Deploy (GitHub Pages)
 
