@@ -3,6 +3,22 @@
 > **Working title:** "NextGame" (working stand-in — may change).
 > **Purpose:** A mobile-first, static personal webapp that picks something to play from entire console libraries, using extensive faceted filters plus a randomizer, and shows a rich profile for the chosen game.
 > **Audience for this doc:** Claude Code (implementation handoff). Decisions below are settled unless flagged in §13.
+>
+> **Status (evolved during prototyping):** A working **N64 prototype** is built and deployed on GitHub Pages. Data is generated from **free, mostly credential-less sources** (Wikidata + libretro-thumbnails + Wikipedia). The next step is **IGDB enrichment** (one free build-time key) for screenshot galleries, trailers, and broader ratings. Several original assumptions changed in contact with reality — this doc reflects the current vision; see §0 for the diff.
+
+---
+
+## 0. What changed from the original plan
+
+The prototype reshaped several decisions. The headline changes:
+
+- **Sources are free-first.** The spine is **Wikidata** (not raw No-Intro/Redump DATs); art is **libretro-thumbnails** (No-Intro–named, via the jsDelivr CDN); descriptions + magazine review scores are **Wikipedia**. IGDB moves from "source of everything" to an **optional enrichment layer** behind one free key. HowLongToBeat is **bot-blocked** and demoted.
+- **The rolled game is the main view**, not a bottom sheet. (A sheet implies a background you return to; here the game *is* the content.)
+- **No swipe-to-decide.** It clashed with swiping the screenshot carousel; the `Roll again` / `I'll play this` buttons cover it.
+- **Time-to-beat is a minor, collapsed filter**, not a hero feature. The main screen has no time chips.
+- **All filters live in one drawer**, prioritized by use (Players + Score up top; Genre + Length collapsed). Console selection lives there too — nothing filter-related sits on the main screen.
+- **Ratings show a per-source breakdown** (incl. old magazines), not a single opaque number.
+- **localStorage namespace is `ng.*`** (was `gr.*`).
 
 ---
 
@@ -10,7 +26,7 @@
 
 A personal toy for answering "what should I play tonight?" by rolling a random game out of a filtered pool drawn from **complete console libraries** (not an owned-backlog subset — assume access to any game on a given console). Filters narrow the pool; a roll picks one; a profile view gives enough context to decide.
 
-**The one framing that drives every decision:** this is a **decision aid over a fixed, finite, mostly-retro library**, *not* a discovery/recommendation engine. Prior art (Pangamea, Ludocene, etc.) all solve the opposite problem — finding *new* games to acquire from the marketplace, with taste-learning recommenders and store links. This app deliberately does **none** of that. No recommendations, no taste model, no "games you might buy." The swipe/card interaction is borrowed; the recommender philosophy is not. Keep that boundary firm — it prevents scope creep.
+**The one framing that drives every decision:** this is a **decision aid over a fixed, finite, mostly-retro library**, *not* a discovery/recommendation engine. Prior art (Pangamea, Ludocene, etc.) all solve the opposite problem — finding *new* games to acquire from the marketplace, with taste-learning recommenders and store links. This app deliberately does **none** of that. No recommendations, no taste model, no "games you might buy." Keep that boundary firm — it prevents scope creep.
 
 ---
 
@@ -19,7 +35,8 @@ A personal toy for answering "what should I play tonight?" by rolling a random g
 - **Vanilla JS, no framework, no build tools.** Native ES modules (`<script type="module">`), plain HTML/CSS. No bundler, no transpile step, nothing that needs compiling before it serves.
 - **Hosted on GitHub Pages**, served straight from the repo. Claude Code commits to GitHub; Pages serves.
 - **Pure static serve path.** No backend, no server-side code reachable at runtime. (The data pipeline in §5 is an *offline* tool, run on demand — never served, never hit by the browser.)
-- **No runtime API calls** except YouTube embeds/links (see §8). All game data is pre-baked into static JSON.
+- **No runtime API calls.** All game data is pre-baked into static JSON. The only runtime *network* the browser does is **hotlinking images** (libretro via jsDelivr, and IGDB's CDN once enriched) and **YouTube links** (§8). These are public CDNs — **no key, no Worker, no proxy**.
+- **Credentials are free and build-time only.** The free path needs none. The one accepted credential is a **free IGDB/Twitch key**, used only by the offline pipeline (env var, never committed, never in the browser). Because nothing authenticated runs at runtime, **no Cloudflare Worker is needed** (unlike VibeTutor's runtime pattern).
 - **State is `localStorage`, per-device.** No cross-device sync — explicitly out of scope (§12). Tested primarily in a mobile browser.
 
 ---
@@ -27,170 +44,177 @@ A personal toy for answering "what should I play tonight?" by rolling a random g
 ## 3. Architecture overview
 
 ```
-                    OFFLINE (run on demand via Claude Code)
-   No-Intro / Redump DATs ─┐
-   IGDB (Twitch OAuth)     ├─►  build pipeline  ─►  /data/*.json  ──► committed to repo
-   HowLongToBeat           │     (Node, /tools)
-   OPM disc sources        ─┘
-                                                         │
-                    RUNTIME (pure static, in the browser)│
-   index.html + /js + /css  ◄── GitHub Pages ◄───────────┘
+                    OFFLINE (build pipeline, run on demand — /tools, Node)
+   Wikidata (SPARQL) ────────┐  game list + genre/mode/dev/publisher/year + Metacritic
+   libretro-thumbnails ──────┤  box / snap / title art, keyed by No-Intro filename
+   Wikipedia (REST + parse) ─┤  summaries + "Reception" magazine review scores
+   IGDB (Twitch OAuth) ──────┤  screenshot galleries, trailer IDs, ratings  [free key]
+   Reddit (exploratory) ─────┘  short real user-opinion quotes
+                                       │  build scripts → enrich, dedup, normalize
+                                       ▼
+                                 /data/*.json  ──►  committed to repo
+                                       │
+                    RUNTIME (pure static, in the browser)
+   index.html + /js + /css  ◄── GitHub Pages ◄──┘
         │
-        └─ fetch() static JSON on demand ──► filter / roll / profile
+        ├─ fetch() static JSON ──► filter / roll / profile
+        └─ hotlink images (libretro jsDelivr CDN, IGDB CDN) + YouTube links
 ```
 
 ### 3.1 Data is generated, not fetched live
-A one-off Node pipeline ingests the data sources, enriches, dedupes, and emits static JSON committed to the repo. It is re-run **only when adding/updating a console**. The IGDB secret lives in an env var on the machine running the pipeline and is **never committed** — and because nothing calls IGDB from the browser, **no Cloudflare Worker proxy is needed** (unlike VibeTutor's runtime pattern).
+A Node pipeline ingests the sources, enriches, dedupes, normalizes, and emits static JSON committed to the repo. Re-run **only when adding/updating a console** or refreshing data. Any credential (just IGDB) lives in an env var on the build machine and is **never committed**; nothing authenticated is reachable at runtime.
 
 ### 3.2 Two-tier data (the key perf decision)
-At "a fuck ton" of games across many consoles, a single payload is too heavy for mobile. Split into:
-
+At many games across many consoles, a single payload is too heavy for mobile. Split into:
 - **Slim index** (per console): the minimum needed to filter, roll, and browse. Always loaded for *active* consoles.
-- **Fat detail** (per console): everything the profile view needs (screenshots, summary, video IDs, score, links). **Lazy-loaded** the first time a profile from that console is opened, then kept in memory.
+- **Fat detail** (per console): everything the profile needs (screenshots, summary, video IDs, review breakdown, social quotes, links). **Lazy-loaded** the first time a profile from that console opens, then kept in memory.
 
 ### 3.3 Lazy-load by active console
-The user toggles which consoles are "active." Only active consoles' slim indexes load. Filters and the randomizer operate over the **union of active consoles**. This bounds the always-in-memory payload regardless of total library size.
+The user toggles which consoles are "active" (in the filter drawer). Only active consoles' slim indexes load. Filters and the randomizer operate over the **union of active consoles**, bounding the in-memory payload regardless of total library size.
 
 ---
 
 ## 4. Data model
 
 ### 4.1 "Everything is a facet"
-Every filterable dimension is either a typed field or a tag in a namespace. Adding a new category (however specific) means **adding tags to entries — never a schema change and never new filter code**. Filters are generated from whatever facets exist in the loaded data.
+Every filterable dimension is either a typed field or a tag in a namespace. Adding a category means **adding tags to entries — never a schema change and never new filter code**. The filter UI is generated from whatever facets exist in the loaded data.
 
 ### 4.2 Stable IDs and dedup
-- ID format: `"{platform}:{slug}"` (e.g. `ps1:final-fantasy-vii`). Stable across re-runs.
-- **Dedup** regional/revision duplicates from the DATs down to **one entry per game**: prefer USA/NTSC-U region, strip dump/revision flags, drop bad dumps (`[b]`), overdumps, and (per config) homebrew/hacks. Region preference and homebrew inclusion are config flags.
+- ID format: `"{platform}:{slug}"` (e.g. `n64:the-legend-of-zelda-ocarina-of-time`). The slug function is **frozen** — IDs must stay stable across re-runs, because `localStorage` history/blocklist reference them.
+- Dedup regional/revision duplicates down to **one entry per game**, preferring USA/NTSC-U. (For the Wikidata-based prototype this is dedup-by-slug; raw-DAT canonicalization remains the ideal for a fuller set.)
 
-### 4.3 Slim index entry (example)
+### 4.3 Slim index entry (current shape)
 ```json
 {
-  "id": "ps1:final-fantasy-vii",
-  "title": "Final Fantasy VII",
-  "platform": "ps1",
-  "year": 1997,
-  "genres": ["rpg"],
+  "id": "n64:the-legend-of-zelda-ocarina-of-time",
+  "title": "The Legend of Zelda: Ocarina of Time",
+  "platform": "n64",
+  "year": 1998,
+  "genres": ["action-adventure"],
   "modes": ["singleplayer"],
-  "rating": 92,
+  "rating": 99,
   "hltbBucket": "long",
-  "cover": "co1r76",
+  "cover": "Legend of Zelda, The - Ocarina of Time (USA)",
   "tags": []
 }
 ```
-`cover` is an IGDB `image_id`; the client resolves it to a URL (§8.5) to keep JSON small.
+- `cover` is the **libretro No-Intro base name**; the client resolves it to box/snap/title URLs (§8.5) to keep JSON small.
+- `rating` is the **headline aggregate** (0–100) used by the rating filter, computed from whatever sources exist (Metacritic / Wikipedia reception / IGDB). May be `null` — unrated games pass the rating filter by default (§7.3).
+- `hltbBucket` is currently a **placeholder** (genre heuristic), flagged in the UI until real playtime data lands.
 
-### 4.4 Fat detail entry (example)
+### 4.4 Fat detail entry (current + planned)
 ```json
 {
-  "id": "ps1:final-fantasy-vii",
-  "developer": "Square",
-  "publisher": "Sony Computer Entertainment",
-  "summary": "…IGDB summary…",
-  "screenshots": ["sc1abc", "sc1def", "sc1ghi"],
-  "videos": ["dQw4w9WgXcQ"],
-  "ratingCount": 1840,
-  "hltb": { "main": 38, "mainExtra": 52, "completionist": 80 },
-  "links": { "metacritic": "https://…", "igdb": "https://…" },
+  "id": "n64:the-legend-of-zelda-ocarina-of-time",
+  "developer": "Nintendo",
+  "publisher": "Nintendo",
+  "summary": "…Wikipedia extract…",
+  "screenshots": ["sc1abc", "sc1def"],      // IGDB image_ids (after enrichment)
+  "videos": ["dQw4w9WgXcQ"],                  // YouTube IDs from IGDB (after enrichment)
+  "reviews": [                                 // per-source breakdown, normalized 0–100
+    { "source": "N64 Magazine", "raw": "98%", "score": 98 },
+    { "source": "EGM", "raw": "9.5/10", "score": 95 },
+    { "source": "IGDB (users)", "raw": null, "score": 96, "count": 1840 }
+  ],
+  "social": [                                  // exploratory: real UGC quotes
+    { "source": "r/n64", "quote": "…", "url": "https://…" }
+  ],
+  "links": { "wikipedia": "https://…" },
+  "hltb": null,
   "trivia": null
 }
 ```
+`reviews`/`social`/`screenshots`/`videos` fill in as enrichment runs; all optional.
 
 ### 4.5 Facet namespaces (extensible)
-- `platform` — `ps1`, `ps2`, `nes`, `snes`, `genesis`, `n64`, `gb`, `gbc`, `gba`, … (one per console added).
-- `genres`, `themes`, `modes` — from IGDB (`game_modes`: `singleplayer`, `co-op`, `multiplayer`, `splitscreen`, …).
-- `hltbBucket` — `short` / `medium` / `long` / `very-long` (thresholds in config; drives the time-budget chips).
-- **`source:opm-demo-disc-NN`** plus an OPM content-type tag — see §5.4.
-- `display:*` — optional, e.g. `display:light-gun` (needs a CRT) or `display:240p`, for CRT-night filtering. Phase 3 / nice-to-have.
+- `platform` — `n64`, … (one per console added).
+- `genres`, `modes` — from Wikidata/IGDB. **Note:** the genre vocabulary is *lumpy* (Wikidata's taxonomy has long-tail one-off tags like `photography`, `personal-watercraft-racing`). The UI collapses genres by default; a future pass may curate to meaningful counts.
+- `hltbBucket` — `short`/`medium`/`long`/`very-long`. **Placeholder** until a real source; minor filter only.
+- `source:opm-demo-disc-NN` + OPM content-type tag — planned (§4.6), later phase.
+- `display:*` — optional CRT-night tags; nice-to-have.
 
-### 4.6 OPM overlay file (example)
-```json
-{
-  "discs": [
-    {
-      "issue": 85,
-      "date": "2004-09",
-      "demos":    ["ps2:def-jam-fight-for-ny", "ps2:star-wars-battlefront"],
-      "videos":   ["ps2:metal-gear-solid-3-snake-eater"],
-      "features": ["ps2:playboy-the-mansion"]
-    }
-  ]
-}
-```
-The build tags the referenced PS2 entries with `source:opm-demo-disc-85` + a content-type (`demo` / `video` / `feature`), so the user can filter "playable OPM demos" specifically vs. "anything that appeared on a disc." Demo-only oddities (content with no full-game entry) get their own entries.
+### 4.6 OPM overlay (planned, later phase)
+Unchanged in intent: an overlay file tags PS2 entries that appeared on Official PlayStation Magazine demo discs (`demo`/`video`/`feature`), enabling "playable OPM demos" filtering and a future "demo disc roulette." Demo-only oddities get their own entries. Not part of the N64 prototype.
 
 ### 4.7 Manifest
-A single `manifest.json` lists what's available so the app hardcodes nothing:
+`manifest.json` lists what's available so the app hardcodes nothing:
 ```json
 {
-  "generatedAt": "2026-05-31T00:00:00Z",
+  "generatedAt": "2026-06-02T00:00:00Z",
   "consoles": [
-    { "id": "ps1", "label": "PlayStation",  "count": 4200, "index": "data/index/ps1.json", "detail": "data/detail/ps1.json" },
-    { "id": "ps2", "label": "PlayStation 2", "count": 2100, "index": "data/index/ps2.json", "detail": "data/detail/ps2.json" }
+    { "id": "n64", "label": "Nintendo 64", "count": 413,
+      "index": "data/index/n64.json", "detail": "data/detail/n64.json" }
   ],
-  "overlays": [ { "id": "opm", "label": "OPM Demo Discs", "file": "data/opm-discs.json" } ]
+  "overlays": []
 }
 ```
+`count` reflects **post-dedup** unique entries (what actually rolls).
 
 ---
 
 ## 5. Data sources & generation pipeline
 
-### 5.1 Sources
+### 5.1 Sources (free-first)
 | Source | Used for | Notes |
 |---|---|---|
-| **No-Intro** (datomatic.no-intro.org) | Canonical complete cartridge libraries (NES, SNES, N64, GB/GBC/GBA, Genesis, Master System, …) | These match the Everdrive sets. DAT download may be a **manual prep step**. |
-| **Redump** (redump.org) | Canonical complete disc libraries (PS1, PS2, …) | Same. |
-| **IGDB** (api.igdb.com/v4) | Genres, themes, `game_modes`, year, developer/publisher, summary, cover, screenshots, video (YouTube) IDs, `total_rating` + count | Twitch Client ID/Secret → OAuth2 client-credentials → bearer token. Apicalypse query syntax. **Pipeline-time only.** Verify current rate limit (~4 req/s) at build. |
-| **HowLongToBeat** | Time-to-beat → buckets | No official API; use a community/scrape approach at build time, bake results. |
-| **PCSX2 Wiki** (wiki.pcsx2.net) + **The PlayStation 2 Project** (playstation2project.wordpress.com) | OPM disc tracklists | Cleanly formatted per-disc pages + master list. **Do not** use the Idea Wiki fandom page — it self-flags as not fully accurate. |
-| **Internet Archive** | OPM disc/box art (optional) | Only if we want disc art. |
+| **Wikidata** (SPARQL) | Game list + genre, player modes, developer, publisher, year, Metacritic-where-present, enwiki sitelink | The practical spine. No key. One query per console. |
+| **libretro-thumbnails** (jsDelivr CDN) | Box / in-game snap / title-screen art | Files are **No-Intro–named**, so they double as the canonical name spine. A blobless `git clone --filter=blob:none` yields the exact filename list → near-exact art matching (~95%). |
+| **Wikipedia** (REST summary + article parse) | Profile blurb **and** "Reception" review-score tables (old magazines: EGM, N64 Magazine, Nintendo Power, …) | All free, real, attributable. Reception scores normalized to 0–100 (`/10`, `/5`, `%`, letter grades). |
+| **IGDB** (api.igdb.com/v4) | **Enrichment:** screenshot galleries, trailer YouTube IDs, `total_rating`/`aggregated_rating`/`rating` + counts, cover/summary backups | Twitch Client ID/Secret → OAuth2 client-credentials → bearer. **Build-time only**, one free key. ~4 req/s. N64 platform id = `4`. |
+| **Reddit** (exploratory) | Short real user-opinion quotes per game | Datacenter IPs are often blocked → may need the free official API (OAuth app) or running elsewhere; needs relevance filtering; marquee-only coverage. |
+| No-Intro / Redump DATs | Canonical complete libraries | The long-term ideal spine; not required for the free path (libretro filenames already carry No-Intro names). |
+| HowLongToBeat | Time-to-beat → buckets | **Bot-blocked (403).** Deprioritized; buckets are placeholders until a workable source. |
 
 ### 5.2 Output
-`/data/index/<console>.json`, `/data/detail/<console>.json`, `/data/opm-discs.json`, `/data/manifest.json`.
+`/data/index/<console>.json`, `/data/detail/<console>.json`, `/data/manifest.json` (and `/data/opm-discs.json` later).
 
-### 5.3 Pipeline steps (idempotent, re-runnable, caches API responses)
-1. **Acquire DATs** per console (manual download or scripted) → parse XML to raw title lists.
-2. **Canonicalize/dedup** (§4.2) → one entry per game with a stable ID.
-3. **Enrich via IGDB** — match by name + platform (fuzzy; record match confidence; leave bare on miss). Pull the fields in §5.1.
-4. **Enrich HLTB** — match by name; compute buckets.
-5. **OPM overlay** — parse PCSX2 + PS2 Project sources, map demo/video/feature → game IDs, tag matching PS2 entries, create entries for demo-only oddities, emit `opm-discs.json`.
-6. **Emit** slim index + fat detail per console + manifest. Cache IGDB/HLTB responses to disk so re-runs don't re-fetch.
+### 5.3 Pipeline steps (idempotent, re-runnable, caches responses)
+1. **List + metadata** from Wikidata SPARQL (platform-scoped). Build stable `id` (frozen slug); dedup by id.
+2. **Art** — match each title to a libretro No-Intro filename (exact from the blobless clone's file list; constructed-candidate fallback). Store the base name.
+3. **Descriptions** — Wikipedia REST summary via the enwiki sitelink; fallback to a title search; Wikidata one-liner as last resort.
+4. **Ratings** — parse the Wikipedia "Reception" table → per-outlet scores normalized 0–100 + an aggregate; keep Wikidata/Metacritic where present.
+5. **IGDB enrich** (build-time, free key) — match by name + platform `4`; pull screenshots, video IDs, ratings + counts, cover/summary backups; **cache the matched IGDB id** per game.
+6. **Social** (exploratory) — Reddit search scoped to gaming subs → a representative quote + permalink, filtered for relevance/quality.
+7. **Emit** slim index + fat detail + manifest. Cache all source responses to disk; honor an `overrides.json` (manual fixes) and a **match cache** (frozen matched ids) so re-runs are idempotent and never clobber hand-fixes.
 
-### 5.4 Enrichment coverage — assumption (confirm in §13)
-**Default stance: "good enough."** No-Intro/Redump give 100% complete title lists for free; IGDB auto-matching is fuzzy (regional names, revisions, homebrew), so expect ~80–90% cleanly enriched with a tail of **bare entries** (title/platform only). Bare entries are valid and still roll/show. Manual cleanup of the tail is **optional and deferred**, not a blocker. Do **not** fill gaps with LLM-generated genres/trivia — hallucinated facts in a profile are worse than blanks.
+### 5.4 Enrichment coverage — the realistic ceiling
+Multi-source and free-first, but **"everything" has a ceiling** and we **never fabricate**:
+- **Art** → ~95% (libretro); misses show a clean title placeholder.
+- **Descriptions** → ~95%; the obscure tail may stay thin.
+- **Ratings** → high for games with articles/IGDB presence; a genuinely-never-reviewed tail stays `null` (and passes the filter by default). Store rating *counts* to flag low-confidence scores.
+- **Social quotes** → marquee titles only; empty for the long tail.
+
+Do **not** fill gaps with LLM-generated facts. Real-and-blank beats invented. Real user quotes (Reddit) are fine — they're sourced opinion, not invented fact (§14).
 
 ---
 
-## 6. Repo structure (proposed)
+## 6. Repo structure (current)
 
 ```
 /index.html
-/css/
-   app.css
+/css/app.css
 /js/
-   main.js
-   data.js          # manifest load, lazy slim/fat fetch, in-memory cache
-   state.js         # localStorage-backed state (§9)
+   main.js          # boot, roll loop, view orchestration, visualViewport height
+   data.js          # manifest load, lazy slim/fat fetch, in-memory cache, image URLs
+   state.js         # localStorage-backed state (ng.* namespace, §9)
    filters.js       # facet collection + filtering
-   randomizer.js    # pool building, weighting, roll
-   ui/              # render: roll button, filter drawer, console chips,
-                    #   profile bottom-sheet, screenshot carousel, video facade
-/data/             # GENERATED — committed
+   randomizer.js    # recency-weighted roll
+   util.js          # small shared helpers (el, label prettify, time labels)
+   ui/
+     profile.js     # full-screen game view: art carousel (dots + autoplay), details
+     controls.js    # filter drawer (console, players, score, length, genre), active chips
+/data/              # GENERATED — committed
    manifest.json
-   index/<console>.json
-   detail/<console>.json
-   opm-discs.json
-/tools/            # OFFLINE pipeline — NOT served
-   build.js
-   parse-dats.js
-   enrich-igdb.js
-   enrich-hltb.js
-   build-opm.js
-   config.js        # region prefs, homebrew flag, hltb thresholds
-/sw.js             # Phase 3 (service worker)
+   index/n64.json
+   detail/n64.json
+/tools/             # OFFLINE pipeline — NOT served
+   build-n64.js     # current: Wikidata + libretro + Wikipedia
+   (planned) enrich-igdb.js, reviews-wikipedia.js, social-reddit.js, overrides.json
+   .cache/          # cached source responses (gitignored)
+/sw.js              # Phase 3 (service worker)
 ```
 
-> **Base-path note:** project pages serve under `/<repo>/`. Fetch data with paths relative to the app root (or read a `<base>`), so it works on both project and user/custom-domain pages.
+> **Base-path note:** project pages serve under `/<repo>/`. Data is fetched with **relative** paths so it works on both project and custom-domain pages.
 
 ---
 
@@ -198,172 +222,165 @@ A single `manifest.json` lists what's available so the app hardcodes nothing:
 
 ### 7.1 Pool building
 1. `A` = union of slim entries across **active consoles**.
-2. Apply active facet filters `F` → `P`.
-3. Subtract the **blocklist**; apply **recency weighting** from roll history.
+2. Apply active facet filters → `P`. Facet semantics: **AND across facets, OR within a facet**.
+3. Subtract the **blocklist** (explicit vetoes); apply **recency weighting** from roll history.
 4. **Roll** = recency-weighted random pick from `P`.
 
-### 7.2 Weighting
-Uniform by default, with a **recency penalty** so recently-shown games resurface less (history in `localStorage`). Optional toggle to favor never-rolled games. Keep it simple — the goal is "stop showing me the same thing," not a recommender.
+### 7.2 Weighting (implemented)
+Uniform by default, with a **recency penalty** so recently-shown games resurface less (decays over ~2h), an optional **"favor never-rolled"** toggle, and a guard against rolling the **same game twice in a row**. Goal is "stop showing me the same thing," not a recommender. An explicit **veto** ("don't show me this again") is distinct from a casual reroll — veto adds to the blocklist; reroll just touches recency.
 
-### 7.3 Rating filter
-A numeric **minimum-rating** control (slider or threshold) over the `rating` field in the slim index (IGDB aggregate, 0–100). Optionally also bake `metacritic` (via RAWG) into the slim index if you want to filter on critic score specifically.
+### 7.3 Rating filter (implemented)
+A numeric **minimum-rating** control over the slim `rating` (0–100 aggregate). **Unrated games pass by default** — most of the retro catalog has no score, so a naive "80+" would nuke it. An explicit **"only rated games"** toggle excludes the unrated. Ratings come from the multi-source blend (§5); the profile shows the per-source breakdown (§8.3).
 
-**Unrated handling (important):** much of the retro catalog has *no* score — Metacritic didn't exist before ~2001, and many obscure titles have few or no IGDB ratings. So unrated games **pass the rating filter by default**, with an explicit **"only rated games"** toggle to exclude them. Without this, a "rated 80+" filter would silently nuke most of the PS1/SNES/NES era. (Pairs naturally with the deep-cuts idea in Phase 3.)
-
-### 7.4 Time-budget chips
-Quick facets on `hltbBucket` surfaced on the main screen: **30 min / 1 hr / all night** → `short` / `medium` / `long`+`very-long`.
+### 7.4 Time-to-beat (minor, collapsed)
+**Demoted from the original plan.** No time chips on the main screen. Time-to-beat is a **collapsed "Length" section** in the filter drawer, on placeholder buckets (`short`/`medium`/`long`/`very-long`) until a real source exists. Flagged as estimates in the UI.
 
 ---
 
 ## 8. UI / UX (mobile-first)
 
 ### 8.1 Layout & core loop
-- Single column. The **roll button is the hero**, anchored at the bottom in the thumb zone.
-- After a roll, the **profile slides up as a bottom sheet**. Core loop: **roll → sheet → "Roll again" / "I'll play this."**
-- **Filters + console toggles** live in a slide-up drawer. Active filters render as **removable chips**; console toggles are **chips in a horizontal scroller**.
+- Single column. **The rolled game is the main full-screen view** — there is no bottom sheet for the profile.
+- The top is intentionally bare: just the title and a **pool count**. Active-filter chips appear there **only when a filter is set** (removable).
+- A **persistent bottom bar** drives the loop: before a roll it's the hero **Roll** button (+ a filters gear); after a roll it becomes **`↻ Roll again`** + **`✓ I'll play this`** (gear stays). Core loop: **roll → read the game → Roll again / I'll play this.**
+- **All filters live in a slide-up drawer** (the one justified sheet — it overlays the game and returns you to it). See §8.4.
 
-### 8.2 Swipe-to-decide loop
-Each rolled game is a card: **swipe right = "I'll play this," swipe left = reroll** (and that game gets down-weighted via the recency penalty). Buttons remain as a fallback for accessibility.
+### 8.2 Decide interaction
+Buttons only — **no swipe-to-decide**. (It conflicted with horizontally swiping the screenshot carousel, and the buttons already cover accept/reroll.)
 
-### 8.3 Profile view contents
-- **Basic info:** title, platform, year, developer, publisher, genres, player modes. (IGDB.)
-- **Cover + screenshots:** swipeable carousel; images lazy-load when the sheet opens.
-- **Score:** aggregate rating (IGDB; optionally Metacritic via RAWG) + a **"Read reviews" link-out**. **No reproduced review text** (copyright + no clean source).
-- **Trivia:** link-out or omit; never LLM-generated.
-- **Video (A + B):**
-  - **(A)** Embed IGDB's trailer inline via a **tap-to-play facade** — show a thumbnail with a play button and only inject the heavy YouTube iframe **on tap** (loading the YT player for every profile would wreck mobile perf/data).
-  - **(B)** A **"Watch gameplay"** button that opens a YouTube search (`youtube.com/results?search_query=<title>+gameplay`) — deep-links into the YouTube app for real gameplay footage. No API/quota.
+### 8.3 Profile view contents (the main view)
+- **Art carousel** in a **4:3 frame** (matches N64 output and the screenshots): each image shown *contained* over a blurred backdrop of itself (no ugly crop). **Page dots** show count + position; the carousel **auto-advances** (~3s), pausing ~4.5s after manual interaction. Frames: box art, in-game snap, title screen (libretro), plus IGDB screenshots once enriched.
+- **Basic info:** title, platform, year, developer, publisher, genres, player modes.
+- **Reviews:** a **per-source breakdown** (e.g. `N64 Magazine 90`, `EGM 80`, `IGDB users 78`) plus a headline aggregate badge, with a **"Read more"** link-out. No reproduced long-form review text.
+- **Summary:** Wikipedia extract.
+- **Social (exploratory):** a short real quote with a link to the source ("what people say").
+- **Video (planned):** once IGDB video IDs exist, a **tap-to-play facade** (thumbnail → inject the YouTube iframe only on tap). Until then, a **"Watch gameplay"** button opens a YouTube search (no API/quota).
+- **Veto:** an explicit "🚫 Don't show me this again."
 
-### 8.4 Touch/perf details
-- Carousels and drawers use CSS-driven gestures; avoid heavyweight libs.
-- Optional `navigator.vibrate` haptic on roll (progressive enhancement — Android Chrome supports it; iOS Safari does not).
+### 8.4 Filters (drawer, prioritized by use)
+Everything filter-related is in the drawer, ordered by how often it's reached for:
+- **Console** (library selection — toggles active consoles), **Players** (modes), **Score** (min-rating slider + "only rated") — all visible.
+- **Length** (time buckets) and **Genre** — **collapsed by default** (genre is a long, lumpy list), each showing a selected-count badge.
+- **When rolling:** "favor never-rolled."
+- A live **"Show N games"** count; **clear-all**; a global **reset**.
 
-### 8.5 IGDB image URL resolution (client-side)
-- Cover: `https://images.igdb.com/igdb/image/upload/t_cover_big/{image_id}.jpg`
-- Screenshot: `https://images.igdb.com/igdb/image/upload/t_720p/{image_id}.jpg`
+### 8.5 Image URL resolution (client-side)
+- libretro (current): `https://cdn.jsdelivr.net/gh/libretro-thumbnails/Nintendo_-_Nintendo_64@master/{Named_Boxarts|Named_Snaps|Named_Titles}/{encoded No-Intro name}.png`
+- IGDB (after enrichment): cover `…/t_cover_big/{image_id}.jpg`, screenshot `…/t_screenshot_huge/{image_id}.jpg`
+
+### 8.6 Touch / perf details
+- Carousel uses native CSS scroll-snap; no heavyweight gesture libs.
+- The app shell is sized to the **actual visible viewport** via the Visual Viewport API (`--app-h`), with `100dvh` fallback. **`viewport-fit=cover` is intentionally not used** — it drew the page into the phone's gesture-bar area and left a dead gap under the bottom bar.
+- Optional `navigator.vibrate` haptic on roll (Android Chrome; iOS Safari ignores it).
 
 ---
 
 ## 9. Persistence (`localStorage`, per-device)
 
-Namespace keys under `gr.`:
-- `gr.activeConsoles` — `string[]`
-- `gr.lastFilters` — last facet selection
-- `gr.presets` — `[{ name, filters, weighting }]` (§10)
-- `gr.blocklist` — `{ genres: [], tags: [], ids: [] }`
-- `gr.history` — `[{ id, ts, action: "shown" | "accepted" | "vetoed" }]` (capped length; feeds recency weighting)
-- `gr.settings` — `{ haptics, … }`
+Namespace keys under **`ng.`**:
+- `ng.activeConsoles` — `string[]`
+- `ng.filters` — current facet selection `{ genres, modes, buckets, rating: { min, onlyRated } }`
+- `ng.history` — `[{ id, ts, action: "shown" | "accepted" | "vetoed" }]` (capped; feeds recency weighting)
+- `ng.blocklist` — `{ genres: [], ids: [] }` (explicit vetoes)
+- `ng.settings` — `{ favorNeverRolled, haptics }`
+- `ng.presets` — planned (named filter combos)
 
-No sync. Provide a clear "reset" affordance.
+No sync. A clear **reset** affordance wipes all of the above.
 
 ---
 
 ## 10. Feature scope & phasing
 
-> Phasing de-risks by proving a full vertical slice on **one** console before generating "a fuck ton."
+### Phase 1 — Vertical slice (DONE, with changes)
+- [x] Pipeline producing **one console — N64** (via **Wikidata + libretro + Wikipedia**, *not* No-Intro+IGDB), slim + fat + manifest.
+- [x] Two-tier loaders with lazy fat fetch + in-memory cache.
+- [x] Facet filtering generated from the data; **button roll**.
+- [x] **Full-screen profile**: 4:3 art carousel with dots + autoplay, basic info, summary, score + links, "Watch gameplay" button.
+- [x] Mobile shell: single column, hero roll button → Roll again / I'll play this, filter drawer.
+- [x] `localStorage` state (`ng.*`): active consoles, filters, history.
+- [x] Recency-weighted randomizer; explicit **veto**/blocklist; **rating filter** with unrated-passes-by-default.
 
-### Phase 1 — Vertical slice (one console, end to end)
-- [ ] Pipeline producing **one console — N64 (US) via No-Intro + IGDB**, slim + fat + manifest. (Deliberately exercises the No-Intro cart path that most of the library uses.)
-- [ ] Two-tier loaders (`data.js`) with lazy fat fetch + in-memory cache.
-- [ ] Facet filtering from loaded data; basic **button roll**.
-- [ ] Profile **bottom sheet**: basic info, cover, screenshots carousel, score + links, video facade (A) + gameplay button (B).
-- [ ] Mobile shell: single column, hero roll button, filter drawer, console chips.
-- [ ] `localStorage` state for active consoles + last filters + history.
+### Phase 1.5 — Data fill (NEXT)
+- [ ] **IGDB enrichment** (free build-time key): screenshot galleries, trailer video IDs, ratings + counts, cover/summary backups.
+- [ ] **libretro blobless-clone** art matching → ~95% covers.
+- [ ] **Wikipedia "Reception"** review scores → per-source breakdown + aggregate.
+- [ ] **Description backfill** (Wikipedia search fallback).
+- [ ] **Reviews UI** (breakdown), **video facade** (tap-to-play), enriched screenshot carousel.
+- [ ] **Social quotes** (Reddit) — exploratory, behind reachability.
+- [ ] **`overrides.json` + match cache** so IDs freeze and fetched/hand-fixed data survive re-runs.
 
-### Phase 2 — Full data + core features
-- [ ] Pipeline extended to **all desired consoles** (No-Intro cart sets + Redump).
-- [ ] **OPM demo disc overlay** (tagging + `opm-discs.json`).
-- [ ] **Swipe-to-decide** loop (right = accept, left = reroll/down-weight).
-- [ ] **Rating filter** (min-rating control + "only rated games" toggle; §7.3).
-- [ ] **Presets** (save/load named filter+weight combos).
-- [ ] **Time-budget chips.**
-- [ ] **Blocklist.**
-- [ ] Recency-weighted randomizer.
+### Phase 2 — Breadth & more features
+- [ ] Pipeline extended to **more consoles** (pressure-tests the two-tier/perf path).
+- [ ] **Presets** (save/load named filter combos).
+- [ ] **OPM demo disc overlay** (PS2; §4.6).
+- [ ] Curated/grouped genre vocabulary.
 
 ### Phase 3 — Extra modes & polish
-- [ ] **"Roll a disc"** mode (pick a random OPM disc, show its full tracklist).
-- [ ] **Decision modes:** "Pick 3" and "this or that" bracket.
-- [ ] **Deep-cuts filter** (high rating, low `ratingCount` → obscure gems).
+- [ ] **"Roll a disc"** (random OPM disc → full tracklist).
+- [ ] **Decision modes:** "Pick 3", "this or that" bracket.
+- [ ] **Deep-cuts filter** (high rating, low rating-count → obscure gems).
 - [ ] **Local co-op / versus** quick-filter.
-- [ ] **PWA:** service worker for offline JSON caching + add-to-home-screen; **home-screen preset shortcuts** ("Demo disc roulette" as its own icon).
-- [ ] **Natural-language filter** — LLM (BYO OpenRouter key) → structured filter spec → deterministic roll; §14.1.
-- [ ] **(Exploratory) further LLM uses** — library-scoped recommend, "why you'd like this" pitch; §14.2. Not committed.
-- [ ] Haptics + animation polish; optional CRT `display:*` tags.
+- [ ] **PWA:** service worker for offline JSON caching + add-to-home-screen; **data versioning / cache-busting** (a content hash or manifest version the SW respects — needed before SW lands).
+- [ ] **Natural-language filter** — LLM (BYO OpenRouter key) → structured filter spec → deterministic roll (§14.1).
+- [ ] Haptics + animation polish (roll suspense, pinned hero while details scroll); optional CRT `display:*` tags.
 
 ---
 
 ## 11. Data & legal note
 
-The dataset stores **metadata only** — titles, genres, years, ratings — plus **URLs to cover/screenshot art on IGDB's CDN** and YouTube video IDs. Demo disc tracklists are factual. **No ROMs or game assets are bundled or hosted.** Hotlink IGDB images per their terms; do not rehost media. This stays clean and is just a personal catalog/picker.
+The dataset stores **metadata only** — titles, genres, years, ratings — plus **URLs to art on third-party CDNs** (libretro via jsDelivr; IGDB once enriched) and YouTube video IDs. **Review scores are facts**, stored with **per-source attribution**. **Social quotes** (if added) are short, attributed excerpts with a link back to the source — personal use, not rehosting. Demo disc tracklists are factual. **No ROMs or game assets are bundled or hosted.** Hotlink images per each provider's terms; don't rehost media. This stays clean — a personal catalog/picker.
 
 ---
 
 ## 12. Out of scope (explicit)
 
 - Cross-device sync; accounts/auth.
-- **Marketplace discovery / acquisition recommendation** — "find new games to buy" out of the storefront firehose (the Ludocene problem). *Note:* LLM features scoped to your **own loaded library** are a different thing — a natural-language filter is in scope (§14.1), with further uses exploratory (§14.2).
+- **Marketplace discovery / acquisition recommendation** (the Ludocene problem). *Note:* LLM features scoped to your **own loaded library** are different — a natural-language filter is in scope (§14.1).
 - Store/purchase links as a feature.
 - ROM hosting or distribution.
-- A server/backend of any kind in the serve path.
+- A server/backend or runtime proxy/Worker of any kind in the serve path.
+- LLM-generated *facts* about games (genres, trivia, scores). Real sourced data only; real user quotes are allowed.
 
 ---
 
 ## 13. Open questions / assumptions to confirm
 
-1. **Enrichment coverage** — assumed **"good enough"** (bare entries OK, ~80–90% auto-match, manual cleanup deferred). Override if you want near-complete genre/cover data (implies grinding the match tail).
-2. **First console (Phase 1) — decided & fully specified: N64 (US) via No-Intro.** Small library, console already hooked up = fast iteration and a real hardware test.
-3. **Console list (for Phase 2)** — N64 is the Phase 1 console; still need the full list of remaining consoles to ingest.
-4. **DAT acquisition** — No-Intro/Redump downloads may be a manual prep step; confirm you'll supply the DAT files or want the pipeline to attempt fetching.
-5. **IGDB credentials & rate limits** — Twitch Client ID/Secret to be supplied via env at build; confirm current rate limit when implementing.
+1. **Enrichment coverage** — *resolved:* free multi-source plan (§5.4). Art ~95%, descriptions ~95%, ratings high-but-not-total, social marquee-only. Never fabricate.
+2. **First console** — *resolved:* N64, built (via Wikidata + libretro, not No-Intro+IGDB).
+3. **Console list (Phase 2)** — **open:** which consoles next (SNES / PS1 would best stress the perf path).
+4. **DAT acquisition** — *resolved for now:* using Wikidata for the list + libretro filenames as the No-Intro name spine; explicit DAT ingestion deferred.
+5. **IGDB credentials & rate limits** — *resolved:* free Twitch app (Client ID/Secret), build-time env var only, no Worker, ~4 req/s. **Integration scheduled next session.**
+6. **Social blurbs (Reddit)** — **open/exploratory:** datacenter-IP blocking (may need the free official API or a different run host) + relevance/quality filtering.
+7. **ID stability & overrides** — **to implement:** freeze the slug, add `overrides.json` + a match cache as sources multiply.
+8. **Data versioning** — **to implement before PWA:** cache-busting for re-baked JSON (`generatedAt` won't invalidate a service-worker cache).
 
 ---
 
 ## 14. LLM layer (BYO OpenRouter key)
 
-**Architecture fit.** A BYO OpenRouter key stored in `localStorage` and called client-side is fine for a personal, single-user app (your own key, your own device) — same pattern as SlopQuest. It does **not** break the static model and needs **no Worker** (the VibeTutor Worker existed to hide a *shared* key; BYOK has nothing to hide).
+**Architecture fit.** A BYO OpenRouter key in `localStorage`, called client-side, is fine for a personal single-user app. It does **not** break the static model and needs **no Worker** (BYOK has nothing to hide).
 
-**Grounding principle (governs everything here).** The LLM never selects games and never asserts game facts from its own memory. It only ever (a) emits a structured filter spec built from a controlled vocabulary the app supplies, or (b) picks from / describes a candidate set the app passes it. The deterministic engine and the baked data stay the source of truth — this is what stops it inventing games or facts that don't exist.
+**Grounding principle (governs everything here).** The LLM never selects games and never asserts game facts from its own memory. It only (a) emits a structured filter spec from a controlled vocabulary the app supplies, or (b) picks from / describes a candidate set the app passes it. The deterministic engine and the baked data stay the source of truth.
 
 ### 14.1 Natural-language filter — COMMITTED (Phase 3)
+Turns a typed/spoken request into a structured filter that drives the existing deterministic roll. The LLM is a smarter *input* to the filter, never the selector. Depends on the filter engine + visible filter UI (built).
 
-Turns a typed or spoken request into a structured filter that drives the existing deterministic roll. The LLM is a smarter *input* to the filter, never the selector. Depends on the filter engine + visible filter UI from Phases 1–2.
+**Flow:** user text → app injects the **available facet vocabulary** (valid platforms, genres, modes, tag namespaces, buckets derived from loaded data) → OpenRouter (JSON-only) → validate the spec against schema **and** vocabulary (drop anything not in-vocabulary) → **populate the visible filter UI** (don't silently auto-roll); the user sees exactly what the model did, can tweak, then rolls. Anything unmappable goes in a surfaced `notes` field — never invented.
 
-**Flow:**
-1. User enters NL text — e.g. "something short and weird on PS1, co-op, that I haven't played."
-2. App assembles the prompt, **injecting the available facet vocabulary** derived from the loaded slim indexes + manifest (valid platform ids, genres, themes, modes, tag namespaces with example values, hltb buckets). This is the crux of grounding — the model can only map to tokens that actually exist in the data.
-3. Call OpenRouter (BYOK). Request JSON-only output (use the model's JSON / structured-output mode if available; otherwise parse defensively and strip code fences).
-4. Validate the returned spec against the schema **and** the vocabulary; drop any value not in the vocabulary.
-5. **Populate the visible filter UI** (chips + sliders) from the spec — do **not** silently auto-roll. The user sees exactly what the model did, can tweak it, then rolls. (Optional "interpret & roll" one-shot for convenience.)
-
-**Output schema (filter spec):**
+**Output schema (sketch):**
 ```json
 {
-  "platforms": ["ps1"],
-  "genres": ["rpg"],
-  "themes": [],
-  "modes": ["co-op"],
+  "platforms": ["n64"], "genres": ["action-adventure"], "modes": ["co-op"],
   "tags": { "include": [], "exclude": [] },
   "rating": { "min": null, "onlyRated": false },
-  "time": { "maxMinutes": null, "buckets": ["short"] },
-  "history": { "excludePlayed": true, "excludeVetoed": false, "excludeRecent": false },
-  "notes": "couldn't map 'weird' to any facet — left as a note, not used for filtering"
+  "time": { "buckets": [] },
+  "history": { "excludePlayed": true, "excludeRecent": false },
+  "notes": "couldn't map 'weird' to any facet — left as a note"
 }
 ```
-All fields optional/nullable; the engine applies only what's set. Anything the model can't map to the supplied vocabulary goes in `notes` (surfaced to the user) — it must **not** invent a token.
-
-**System-prompt design (sketch):**
-> You translate a player's natural-language request into a structured filter for a personal game picker. You do **not** choose games and you do **not** know which games exist. Output **only** JSON matching the schema — no prose, no code fences. Use **only** values from the VOCABULARY provided; if a concept doesn't map to an allowed value, put it in `notes` and do not invent a value. Omit or null anything the user didn't ask for.
->
-> VOCABULARY: { platforms: […active…], genres: […], themes: […], modes: […], tagNamespaces: { "source": […], "display": […] }, hltbBuckets: [short, medium, long, very-long] }
->
-> SCHEMA: { …as above… }
-
-**Refinement (conversational).** For follow-ups like "more chill, less RPG," pass the **current filter spec** alongside the new instruction; the model returns an updated spec, which re-populates the chips. Ties into the swipe-veto loop.
-
-**Config & failure handling.** Model is user-configurable via OpenRouter; default to a cheap, fast model (this is structured extraction, not creative writing). On invalid JSON, retry once, then fall back to manual filtering with a short message. On a spec that matches zero games, say so and leave the editable chips in place rather than rolling nothing.
+On invalid JSON, retry once then fall back to manual filtering. On a zero-match spec, say so and leave the editable chips in place.
 
 ### 14.2 Further LLM uses — exploratory (not committed)
-
-Same BYOK setup and grounding principle; shapes TBD.
-- **Library-scoped recommend.** Pass history (accepted/vetoed/played) + a candidate set (the current filtered pool or a sample) and have the model rank or pick. The "recommend from my history" idea, scoped to games you own.
-- **"Why you might like this" pitch.** A short subjective vibe blurb grounded in the rolled game's real metadata — a safer fill for the trivia gap than invented facts.
+Same BYOK + grounding.
+- **Library-scoped recommend.** Pass history + a candidate set (the current pool or a sample); have the model rank/pick from *that set only*.
+- **Quote selection/cleanup.** A grounded, allowed use: have the model pick or tidy the most representative quote from **real fetched** social comments (§5.6) — selecting from a real candidate set, not inventing. (This largely supersedes the old "why you'd like this" LLM-pitch idea, since we now prefer **real** user quotes over generated ones.)
