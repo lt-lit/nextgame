@@ -144,18 +144,28 @@ async function fetchMedia(igdbIds, auth) {
   for (let i = 0; i < igdbIds.length; i += 500) {
     const chunk = igdbIds.slice(i, i + 500);
     const rows = await igdb('games',
-      `fields id,screenshots.image_id,artworks.image_id,videos.video_id; where id = (${chunk.join(',')}); limit 500;`, auth);
+      `fields id,screenshots.image_id,artworks.image_id,videos.video_id,videos.name; where id = (${chunk.join(',')}); limit 500;`, auth);
     for (const r of rows) {
       media.set(r.id, {
         screenshots: (r.screenshots || []).map((s) => s.image_id).filter(Boolean),
         artworks: (r.artworks || []).map((a) => a.image_id).filter(Boolean),
-        videos: (r.videos || []).map((v) => v.video_id).filter(Boolean),
+        videos: (r.videos || []).map(igdbVideo).filter(Boolean),
       });
     }
     process.stdout.write(`\r     media for ${Math.min(i + 500, igdbIds.length)}/${igdbIds.length}...`);
   }
   if (igdbIds.length) process.stdout.write('\n');
   return media;
+}
+
+// IGDB game_video -> typed record. The `name` ("Trailer", "Launch Trailer",
+// "Gameplay", "Gameplay Trailer", ...) classifies it; gameplay-ish names become
+// type:'gameplay' so they sort ahead of marketing trailers in the UI.
+function igdbVideo(v) {
+  if (!v || !v.video_id) return null;
+  const name = (v.name || '').trim();
+  const type = /game\s?play|walk\s?through|play\s?through/i.test(name) ? 'gameplay' : 'trailer';
+  return { id: v.video_id, type, title: name };
 }
 
 const EMPTY_MEDIA = { screenshots: [], artworks: [], videos: [] };
@@ -188,5 +198,5 @@ const igdbUrl = (g) => (g && g.slug ? `https://www.igdb.com/games/${g.slug}` : n
 
 module.exports = {
   getToken, bulkPlatformGames, buildIndex, matchSpine, fetchMedia, EMPTY_MEDIA,
-  deriveRatings, companies, igdbCover, igdbUrl, round,
+  deriveRatings, companies, igdbCover, igdbUrl, round, igdbVideo,
 };

@@ -35,7 +35,7 @@ A personal toy for answering "what should I play tonight?" by rolling a random g
 - **Vanilla JS, no framework, no build tools.** Native ES modules (`<script type="module">`), plain HTML/CSS. No bundler, no transpile step, nothing that needs compiling before it serves.
 - **Hosted on GitHub Pages**, served straight from the repo. Claude Code commits to GitHub; Pages serves.
 - **Pure static serve path.** No backend, no server-side code reachable at runtime. (The data pipeline in §5 is an *offline* tool, run on demand — never served, never hit by the browser.)
-- **No runtime API calls.** All game data is pre-baked into static JSON. The only runtime *network* the browser does is **hotlinking images** (libretro via jsDelivr, and IGDB's CDN once enriched) and **YouTube links** (§8). These are public CDNs — **no key, no Worker, no proxy**.
+- **No runtime API calls.** All game data is pre-baked into static JSON. The only runtime *network* the browser does is **hotlinking images** (libretro via jsDelivr, and IGDB's CDN once enriched) and **YouTube links + opt-in video embeds** (§8 — the IFrame Player API / no-cookie embed loads only when the user plays a video or enables autoplay). These are public CDNs — **no key, no Worker, no proxy**.
 - **Credentials are free and build-time only.** The free path needs none. The one accepted credential is a **free IGDB/Twitch key**, used only by the offline pipeline (env var, never committed, never in the browser). Because nothing authenticated runs at runtime, **no Cloudflare Worker is needed** (unlike VibeTutor's runtime pattern).
 - **State is `localStorage`, per-device.** No cross-device sync — explicitly out of scope (§12). Tested primarily in a mobile browser.
 
@@ -110,7 +110,10 @@ Every filterable dimension is either a typed field or a tag in a namespace. Addi
   "publisher": "Nintendo",
   "summary": "…Wikipedia extract…",
   "screenshots": ["sc1abc", "sc1def"],      // IGDB image_ids (after enrichment)
-  "videos": ["dQw4w9WgXcQ"],                  // YouTube IDs from IGDB (after enrichment)
+  "videos": [                                 // typed YouTube records, gameplay first
+    { "id": "ktwVEYqnpcc", "type": "gameplay", "title": "GoldenEye 007 — N64 Gameplay" },
+    { "id": "dQw4w9WgXcQ", "type": "trailer",  "title": "Launch Trailer" }
+  ],                                          // type: gameplay|trailer|review; bare-id strings still accepted
   "reviews": [                                 // per-source breakdown, normalized 0–100
     { "source": "N64 Magazine", "raw": "98%", "score": 98 },
     { "source": "EGM", "raw": "9.5/10", "score": 95 },
@@ -254,7 +257,7 @@ Buttons only — **no swipe-to-decide**. (It conflicted with horizontally swipin
 - **Reviews:** a **per-source breakdown** (e.g. `N64 Magazine 90`, `EGM 80`, `IGDB users 78`) plus a headline aggregate badge, with a **"Read more"** link-out. No reproduced long-form review text.
 - **Summary:** Wikipedia extract.
 - **Social (exploratory):** a short real quote with a link to the source ("what people say").
-- **Video (planned):** once IGDB video IDs exist, a **tap-to-play facade** (thumbnail → inject the YouTube iframe only on tap). Until then, a **"Watch gameplay"** button opens a YouTube search (no API/quota).
+- **Video:** a **16:9 stage above the art carousel** plays every video a game has — **gameplay first, then trailers** (and reviews if present) — selected via a labeled thumbnail filmstrip. Click-to-play **facade** (no YouTube JS until the user opts in), the **IFrame Player API** for **auto-advance at a video's end** + runtime embed-disabled detection, and an **autoplay** toggle (off by default; muted-on-open per browser policy). Trailer IDs come from IGDB; **gameplay is found at build time by a keyless YouTube (InnerTube) search** with quality heuristics + an oEmbed embeddability filter. A **"Watch gameplay"** YouTube-search button remains as the fallback for games with no embeddable video.
 - **Veto:** an explicit "🚫 Don't show me this again."
 
 ### 8.4 Filters (drawer, prioritized by use)
@@ -282,7 +285,7 @@ Namespace keys under **`ng.`**:
 - `ng.filters` — current facet selection `{ genres, modes, buckets, rating: { min, onlyRated } }`
 - `ng.history` — `[{ id, ts, action: "shown" | "accepted" | "vetoed" }]` (capped; feeds recency weighting)
 - `ng.blocklist` — `{ genres: [], ids: [] }` (explicit vetoes)
-- `ng.settings` — `{ favorNeverRolled, haptics }`
+- `ng.settings` — `{ favorNeverRolled, haptics, autoplayVideos }`
 - `ng.presets` — planned (named filter combos)
 
 No sync. A clear **reset** affordance wipes all of the above.
@@ -304,7 +307,8 @@ No sync. A clear **reset** affordance wipes all of the above.
 - [x] **IGDB enrichment** (free build-time key) on **both** consoles: screenshot + key-art galleries, trailer video IDs, ratings + counts, cover/summary backups.
 - [x] **Cover fill** → 94% (N64) / 98% (Xbox) via IGDB cover → libretro boxart → Wikipedia lead image.
 - [x] **Meaty descriptions** → 100% via Wikipedia full lead section → IGDB summary → metadata-composed fallback.
-- [x] **Reviews UI** (breakdown), **video facade** (tap-to-play), enriched screenshot carousel.
+- [x] **Reviews UI** (breakdown), **video section** (16:9 stage above the art: gameplay + trailers, filmstrip, auto-advance, autoplay toggle), enriched screenshot carousel.
+- [x] **Keyless gameplay videos** — build-time YouTube (InnerTube) search, heuristically picked + oEmbed embeddability-filtered, merged ahead of IGDB trailers as typed `{ id, type, title }` records.
 - [x] **`overrides.json` + match cache** so IDs freeze and fetched/hand-fixed data survive re-runs.
 - [ ] **≥5 screenshots for every game** — capped by IGDB for retro; needs a richer source (MobyGames/TheGamesDB key) plugged into the `{ src:'url' }` record type.
 - [ ] **Wikipedia "Reception"** review scores → per-source breakdown + aggregate.

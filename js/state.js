@@ -19,7 +19,7 @@ export const state = {
   filters: { ...defaultFilters(), ...read('filters', {}) },
   history: read('history', []),                    // [{ id, ts, action: 'shown'|'accepted'|'vetoed' }]
   blocklist: read('blocklist', { genres: [], ids: [] }),
-  settings: read('settings', { favorNeverRolled: false, haptics: true }),
+  settings: read('settings', { favorNeverRolled: false, haptics: true, autoplayVideos: false }),
 };
 
 export function save(key) { write(key, state[key]); }

@@ -107,7 +107,7 @@ a { color: inherit; }
 .veto-btn:active { color: var(--warn); border-color: var(--warn); }
 .note { font-size: 11.5px; color: var(--muted); margin-top: 16px; line-height: 1.4; }
 
-/* ---------- profile sections (reviews, trailers) ---------- */
+/* ---------- profile sections (reviews) ---------- */
 .pf-section { margin: 20px 0 2px; }
 .pf-section-h { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 10px; }
 
@@ -122,18 +122,31 @@ a { color: inherit; }
 .review-score.ok   { background: color-mix(in srgb, var(--accent) 24%, var(--bg-card)); border-color: var(--accent); }
 .review-score.weak { background: color-mix(in srgb, var(--warn) 22%, var(--bg-card)); border-color: var(--warn); }
 
-/* trailer facades (click to load) — full-bleed horizontal scroller */
-.trailer-row { display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none;
-  margin: 0 -18px; padding: 0 18px 4px; scroll-snap-type: x proximity; }
-.trailer-row::-webkit-scrollbar { display: none; }
-.trailer, .trailer-frame { flex: none; width: 260px; aspect-ratio: 16 / 9; border-radius: 13px;
-  border: 1px solid var(--line); scroll-snap-align: start; }
-.trailer { position: relative; overflow: hidden; background: #07080b; display: grid; place-items: center; padding: 0; }
-.trailer-thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.trailer-play { position: relative; z-index: 1; width: 46px; height: 46px; border-radius: 50%;
-  background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.55); display: grid; place-items: center;
-  font-size: 16px; color: #fff; padding-left: 3px; }
-.trailer:active { transform: scale(.98); }
+/* ---------- video stage (16:9, above the art carousel) ---------- */
+.pf-videos { flex: none; width: 100%; background: #07080b; border-bottom: 1px solid var(--line); }
+.pf-video-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; overflow: hidden; }
+.pf-video-mount, .pf-video-mount iframe, .pf-video-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.pf-video-facade { position: absolute; inset: 0; width: 100%; height: 100%; display: grid; place-items: center; padding: 0; background: #07080b; }
+.pf-video-stage.playing .pf-video-facade { display: none; }
+.pf-video-thumbimg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pf-video-play { position: relative; z-index: 1; width: 58px; height: 58px; border-radius: 50%;
+  background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.6); display: grid; place-items: center;
+  font-size: 21px; color: #fff; padding-left: 4px; }
+.pf-video-facade:active .pf-video-play { transform: scale(.95); }
+.pf-video-unavail { position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+  color: var(--muted); font-size: 13px; padding: 0 24px; }
+
+/* filmstrip selector — full-bleed horizontal scroller */
+.pf-video-strip { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 10px 18px; }
+.pf-video-strip::-webkit-scrollbar { display: none; }
+.pf-video-chip { position: relative; flex: none; width: 132px; aspect-ratio: 16 / 9; border-radius: 10px;
+  overflow: hidden; border: 1px solid var(--line); background: #07080b; padding: 0; transition: transform .08s ease; }
+.pf-video-chip:active { transform: scale(.97); }
+.pf-video-chip.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pf-video-chipimg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pf-video-tag { position: absolute; left: 6px; bottom: 6px; z-index: 1; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .4px; padding: 2px 6px; border-radius: 6px;
+  background: rgba(0,0,0,.66); color: #fff; }
 
 /* ---------- persistent control bar ---------- */
 .hero { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 16px calc(11px + var(--safe-b)); border-top: 1px solid var(--line); background: var(--bg); }
