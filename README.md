@@ -74,8 +74,9 @@ tools/consoles.js        # per-console config (Wikidata QID, libretro repo, IGDB
 tools/lib/               # source modules: wikidata, libretro, wikipedia, igdb
 ```
 
-> **Xbox (original)** data is built and committed (IGDB-enriched: covers,
-> screenshots, trailers, ratings) but **not yet registered in the manifest** —
-> wiring it into the UI (console switcher, screenshot carousel, video facade,
-> per-source review breakdown) is the next step. The deployed app still serves
-> N64 only until then.
+> **Xbox (original)** is now wired in (IGDB-enriched: covers, screenshots,
+> trailers, per-source ratings). The drawer's **Console** facet switches between
+> or combines libraries; a rolled game shows a screenshot carousel, click-to-load
+> trailer facades (no third-party JS until tapped), and a per-source review
+> breakdown. Fields a console lacks — N64 has no IGDB media — degrade to clean
+> placeholders, so the same profile view serves both the free and IGDB paths.

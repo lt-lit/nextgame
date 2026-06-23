@@ -1,8 +1,8 @@
 // ui/profile.js — render the rolled game as the main full-screen view.
-import { coverUrl, snapUrl, titleUrl } from '../data.js';
+import { coverUrl, snapUrl, titleUrl, screenshotUrl, ytThumb, ytEmbed, consoleInfo } from '../data.js';
 import { pretty, TIME_LABELS, el } from '../util.js';
 
-const PLATFORM_LABELS = { n64: 'Nintendo 64' };
+const platformLabel = (p) => consoleInfo(p)?.label || p;
 let _stopCarousel = null; // tears down the previous game's auto-advance timer
 
 export function renderProfile(container, game, detail) {
@@ -13,21 +13,27 @@ export function renderProfile(container, game, detail) {
 
   // --- hero: art carousel (contained over a blurred backdrop) ---
   const hero = el('div', { class: 'pf-hero' });
-  _stopCarousel = buildCarousel(hero, game);
+  _stopCarousel = buildCarousel(hero, game, d);
   wrap.append(hero);
 
   // --- details ---
   const pad = el('div', { class: 'profile-pad' });
-  const sub = [PLATFORM_LABELS[game.platform] || game.platform, game.year].filter(Boolean).join(' · ');
+  const sub = [platformLabel(game.platform), game.year].filter(Boolean).join(' · ');
   pad.innerHTML = `<h2>${game.title}</h2><div class="sub">${sub}</div>`;
 
   const badges = el('div', { class: 'badges' });
-  if (game.rating != null) badges.insertAdjacentHTML('beforeend', `<span class="badge score">★ ${game.rating}</span>`);
+  if (game.rating != null) {
+    const title = d.ratingCount ? ` title="${d.ratingCount} ratings"` : '';
+    badges.insertAdjacentHTML('beforeend', `<span class="badge score"${title}>★ ${game.rating}</span>`);
+  }
   if (game.hltbBucket) badges.insertAdjacentHTML('beforeend',
     `<span class="badge time placeholder" title="Estimated — real HowLongToBeat data not yet wired in">~${TIME_LABELS[game.hltbBucket]}</span>`);
   for (const g of game.genres) badges.insertAdjacentHTML('beforeend', `<span class="badge">${pretty(g)}</span>`);
   for (const m of game.modes) badges.insertAdjacentHTML('beforeend', `<span class="badge">${pretty(m)}</span>`);
   pad.append(badges);
+
+  const reviews = reviewsBlock(d);
+  if (reviews) pad.append(reviews);
 
   if (d.summary) { const s = el('p', { class: 'summary' }); s.textContent = d.summary; pad.append(s); }
 
@@ -36,10 +42,14 @@ export function renderProfile(container, game, detail) {
   if (d.publisher) kv.push(`<div class="kv"><span class="k">Publisher</span><span>${d.publisher}</span></div>`);
   if (kv.length) pad.insertAdjacentHTML('beforeend', kv.join(''));
 
+  const trailers = trailersBlock(d);
+  if (trailers) pad.append(trailers);
+
   const links = el('div', { class: 'links' });
-  const yt = `https://www.youtube.com/results?search_query=${encodeURIComponent(game.title + ' ' + (PLATFORM_LABELS[game.platform] || '') + ' gameplay')}`;
+  const yt = `https://www.youtube.com/results?search_query=${encodeURIComponent(game.title + ' ' + platformLabel(game.platform) + ' gameplay')}`;
   links.insertAdjacentHTML('beforeend', `<a class="link-btn play" href="${yt}" target="_blank" rel="noopener">▶ Watch gameplay</a>`);
   if (d.links && d.links.wikipedia) links.insertAdjacentHTML('beforeend', `<a class="link-btn" href="${d.links.wikipedia}" target="_blank" rel="noopener">Read more</a>`);
+  if (d.links && d.links.igdb) links.insertAdjacentHTML('beforeend', `<a class="link-btn" href="${d.links.igdb}" target="_blank" rel="noopener">IGDB</a>`);
   pad.append(links);
 
   pad.insertAdjacentHTML('beforeend', `<div class="veto-row"><button class="veto-btn" data-veto="${game.id}">🚫 Don't show me this again</button></div>`);
@@ -51,13 +61,76 @@ export function renderProfile(container, game, detail) {
   container.append(wrap);
 }
 
+// Ordered hero images: cover first, then the IGDB screenshot gallery (enriched
+// consoles) or the libretro snap/title variants (free path). Falsy URLs drop out.
+function mediaUrls(game, d) {
+  const out = [coverUrl(game.platform, game.cover)];
+  const shots = Array.isArray(d.screenshots) ? d.screenshots : [];
+  if (shots.length) {
+    for (const s of shots.slice(0, 8)) out.push(screenshotUrl(s));
+  } else {
+    out.push(snapUrl(game.platform, game.cover), titleUrl(game.platform, game.cover));
+  }
+  return out.filter(Boolean);
+}
+
+// Per-source review breakdown (IGDB-enriched consoles only). Each row pairs the
+// source with its normalized 0–100 score and a bit of context (count or raw scale).
+function reviewsBlock(d) {
+  if (!Array.isArray(d.reviews) || !d.reviews.length) return null;
+  const box = el('div', { class: 'pf-section reviews' });
+  box.append(el('div', { class: 'pf-section-h' }, 'Reviews'));
+  for (const r of d.reviews) {
+    const meta = r.count != null ? `${r.count} ${r.count === 1 ? 'rating' : 'ratings'}` : (r.raw || '');
+    const tier = r.score == null ? '' : (r.score >= 75 ? ' good' : r.score >= 60 ? ' ok' : ' weak');
+    box.append(el('div', { class: 'review-row' },
+      el('span', { class: 'review-src' }, r.source),
+      meta ? el('span', { class: 'review-meta' }, meta) : null,
+      el('span', { class: 'review-score' + tier }, r.score != null ? String(r.score) : '—'),
+    ));
+  }
+  return box;
+}
+
+// Click-to-load trailer facades: a thumbnail until tapped, then a youtube-nocookie
+// embed swaps in place. No third-party JS loads until the user opts in. Free path
+// has no videos, so this section simply doesn't render.
+function trailersBlock(d) {
+  const vids = Array.isArray(d.videos) ? d.videos.filter(Boolean) : [];
+  if (!vids.length) return null;
+  const box = el('div', { class: 'pf-section trailers' });
+  box.append(el('div', { class: 'pf-section-h' }, vids.length > 1 ? `Trailers · ${vids.length}` : 'Trailer'));
+  const row = el('div', { class: 'trailer-row' });
+  for (const id of vids.slice(0, 8)) row.append(trailerCard(id));
+  box.append(row);
+  return box;
+}
+
+function trailerCard(id) {
+  const card = el('button', { class: 'trailer', 'aria-label': 'Play trailer' });
+  const thumb = new Image();
+  thumb.className = 'trailer-thumb';
+  thumb.loading = 'lazy';
+  thumb.src = ytThumb(id);
+  thumb.onerror = () => thumb.remove(); // keep the dark card + play glyph if the thumb 404s
+  card.append(thumb, el('span', { class: 'trailer-play' }, '▶'));
+  card.addEventListener('click', () => {
+    card.replaceWith(el('iframe', {
+      class: 'trailer-frame', src: ytEmbed(id), title: 'Trailer', frameborder: '0',
+      allow: 'accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture',
+      allowfullscreen: '',
+    }));
+  }, { once: true });
+  return card;
+}
+
 // Art carousel with page dots + gentle auto-advance. Images that 404 drop out
 // (the dot count follows the images that actually load). Returns a stop() fn.
-function buildCarousel(hero, game) {
+function buildCarousel(hero, game, detail) {
   const bg = el('div', { class: 'pf-bg' });
   const carousel = el('div', { class: 'carousel' });
   const dots = el('div', { class: 'dots' });
-  const urls = [coverUrl(game.platform, game.cover), snapUrl(game.platform, game.cover), titleUrl(game.platform, game.cover)].filter(Boolean);
+  const urls = mediaUrls(game, detail);
 
   if (!urls.length) {
     carousel.append(el('div', { class: 'art-fallback' }, el('span', {}, game.title)));

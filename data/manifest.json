@@ -1,6 +1,6 @@
 {
   "generatedAt": "2026-06-01T19:13:02.151Z",
-  "note": "Prototype data. Sources: Wikidata + libretro-thumbnails + Wikipedia. No credentials used.",
+  "note": "Prototype data. Sources: Wikidata + libretro-thumbnails + Wikipedia; IGDB (build-time key) adds covers/screenshots/trailers/ratings on IGDB-enabled consoles (Xbox).",
   "consoles": [
     {
       "id": "n64",
@@ -8,6 +8,13 @@
       "count": 413,
       "index": "data/index/n64.json",
       "detail": "data/detail/n64.json"
+    },
+    {
+      "id": "xbox",
+      "label": "Xbox",
+      "count": 987,
+      "index": "data/index/xbox.json",
+      "detail": "data/detail/xbox.json"
     }
   ],
   "overlays": []
