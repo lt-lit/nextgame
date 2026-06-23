@@ -4,8 +4,10 @@ A mobile-first, static "what should I play tonight?" picker. Rolls a random game
 from a console library, with faceted filters and a rich profile view.
 See [`nextgame-design-doc.md`](./nextgame-design-doc.md) for the full design.
 
-This is an **early direction-finding prototype**: one console (Nintendo 64),
-real data, no build step, no backend, no credentials.
+Two libraries ship today — **Nintendo 64** and **Xbox (original)** — both
+IGDB-enriched (covers, screenshot galleries, trailers, per-source ratings) on top
+of a Wikidata spine, with meaty Wikipedia descriptions. Static at runtime: the
+data is generated offline and committed; the app reads JSON, no backend.
 
 ## Run locally
 
@@ -28,9 +30,9 @@ that the app reads. Each console is a config entry in `tools/consoles.js`
 console needs no pipeline code. Sources:
 
 - **Wikidata** (SPARQL) — game list + genre, player modes, developer, publisher, year, and Metacritic score where present. *Free, no key.*
-- **libretro-thumbnails** (via jsDelivr CDN) — box / snap / title art, keyed by No-Intro/Redump filename. *Free, no key.*
-- **Wikipedia** (REST summary) — the profile blurb. *Free, no key.*
-- **IGDB** (api.igdb.com) — cover + screenshot galleries, trailer IDs, and ratings + counts; the primary art/rating source on consoles that enable it. *Free build-time key (see below).*
+- **IGDB** (api.igdb.com) — covers, screenshot + key-art galleries, trailer IDs, and ratings + counts; the primary art/rating source. *Free build-time key (see below).*
+- **libretro-thumbnails** (via jsDelivr CDN) — box / snap / title art, keyed by No-Intro/Redump filename; cover fallback **and** extra N64 screenshots (snap + title screen). *Free, no key.*
+- **Wikipedia** — the full lead section (action API, plain-text — meaty, multi-paragraph) for the description, plus the REST summary's lead image as a cover fallback. *Free, no key.*
 
 ### IGDB credentials (only for IGDB-enabled consoles)
 
@@ -46,17 +48,21 @@ under `tools/.cache/` (gitignored); matched IGDB ids freeze in
 `tools/igdb-matches.<console>.json` and manual fixes live in `tools/overrides.json`,
 so re-runs are idempotent and never clobber hand-fixes.
 
-### Known gaps in this first cut (honest, not bugs)
+### Coverage (after IGDB enrichment)
 
-- **Scores** — only ~3% of N64 titles carry a Metacritic score on Wikidata; the rest are `null`. Unrated games still pass the rating filter by default (design doc §7.3).
+| | cover | description | ≥1 screenshot | ≥5 screenshots |
+|---|---|---|---|---|
+| **N64** (413) | 94% | 100% | 81% | 52% |
+| **Xbox** (987) | 98% | 100% | 67% | 35% |
+
+- **Cover art** — IGDB cover → libretro boxart (N64) → Wikipedia lead image. The few misses show a clean title placeholder.
+- **Descriptions** — every game has one: the full Wikipedia lead section (meaty, multi-paragraph) where it exists, else the IGDB summary, else a factual line composed from metadata.
+- **Screenshots** — the gallery blends IGDB screenshots, IGDB key art, and (N64) the libretro in-game snap + title screen. The **≥5-per-game** target is capped by what IGDB actually holds for retro titles (~1/3–1/2 of games); closing it fully needs a richer screenshot source (e.g. a MobyGames / TheGamesDB key) — the source-tagged art model already accepts `{ src:'url', url }` records, so adding one is a generator-only change.
+
+### Known gaps (honest, not bugs)
+
+- **Scores** — IGDB ratings now cover ~53% (N64) / 72% (Xbox); the rest are `null`. Unrated games still pass the rating filter by default (design doc §7.3).
 - **Time-to-beat buckets** — HowLongToBeat blocks scraping, so `hltbBucket` is a transparent **genre-based placeholder** (flagged `~` in the UI). It's a minor, collapsed filter in the drawer.
-- **Cover art** — ~62% match against libretro; misses show a clean title placeholder.
-
-These are being filled next (see design doc §5 / §10): a libretro blobless-clone for
-~95% art, Wikipedia "Reception" tables for real per-magazine review scores, and IGDB
-enrichment (one free build-time key) for screenshot galleries, trailers, and ratings.
-It's all swappable — the app only reads the generated JSON, so the generator can be
-repointed at any source without touching the app.
 
 ## Deploy (GitHub Pages)
 
@@ -74,9 +80,11 @@ tools/consoles.js        # per-console config (Wikidata QID, libretro repo, IGDB
 tools/lib/               # source modules: wikidata, libretro, wikipedia, igdb
 ```
 
-> **Xbox (original)** is now wired in (IGDB-enriched: covers, screenshots,
-> trailers, per-source ratings). The drawer's **Console** facet switches between
-> or combines libraries; a rolled game shows a screenshot carousel, click-to-load
-> trailer facades (no third-party JS until tapped), and a per-source review
-> breakdown. Fields a console lacks — N64 has no IGDB media — degrade to clean
-> placeholders, so the same profile view serves both the free and IGDB paths.
+> Both **N64** and **Xbox (original)** are IGDB-enriched (covers, screenshot
+> galleries, trailers, per-source ratings). The drawer's **Console** facet switches
+> between or combines libraries; a rolled game shows a screenshot carousel,
+> click-to-load trailer facades (no third-party JS until tapped), and a per-source
+> review breakdown. Cover and screenshot records are **source-tagged**
+> (`{ src:'igdb' | 'libretro' | 'url', … }`) and resolved to URLs client-side, so a
+> single gallery blends IGDB media, libretro snap/title art, and ready-made URLs;
+> anything a game lacks degrades to a clean placeholder.

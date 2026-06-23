@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-06-01T19:13:02.151Z",
-  "note": "Prototype data. Sources: Wikidata + libretro-thumbnails + Wikipedia; IGDB (build-time key) adds covers/screenshots/trailers/ratings on IGDB-enabled consoles (Xbox).",
+  "generatedAt": "2026-06-23T16:00:58.382Z",
+  "note": "Sources: Wikidata (spine) + IGDB (covers/screenshots/artwork/trailers/ratings) + libretro-thumbnails (N64 box/snap/title) + Wikipedia (meaty descriptions + cover fallback). Both consoles IGDB-enriched.",
   "consoles": [
     {
       "id": "n64",
