@@ -3,6 +3,7 @@
 
 const DATA_ROOT = 'data';
 const CDN = 'https://cdn.jsdelivr.net/gh';
+const IGDB_IMG = 'https://images.igdb.com/igdb/image/upload'; // IGDB image CDN; ids resolve client-side
 
 // libretro thumbnail repo per platform — used to resolve art URLs client-side
 // (slim JSON only stores the No-Intro base name, keeping payloads small).
@@ -49,10 +50,25 @@ export async function getDetail(game) {
 }
 
 // ---- client-side art URL resolution ----
-function artUrl(platform, kind, base) {
+// Cover art is polymorphic by source: a libretro No-Intro base name (free path,
+// e.g. N64) or an IGDB image id wrapped as { src:'igdb', id } (IGDB-enriched,
+// e.g. Xbox). Screenshots (IGDB ids) and trailers (YouTube ids) ride in detail.
+const igdbImg = (id, size) => (id ? `${IGDB_IMG}/t_${size}/${id}.jpg` : null);
+
+function libretroUrl(platform, kind, base) {
   const repo = ART_REPO[platform];
   return repo && base ? `${CDN}/${repo}/${kind}/${encodeURIComponent(base)}.png` : null;
 }
-export const coverUrl = (platform, base) => artUrl(platform, 'Named_Boxarts', base);
-export const snapUrl  = (platform, base) => artUrl(platform, 'Named_Snaps', base);
-export const titleUrl = (platform, base) => artUrl(platform, 'Named_Titles', base);
+
+export function coverUrl(platform, cover) {
+  if (!cover) return null;
+  if (typeof cover === 'object') return cover.src === 'igdb' ? igdbImg(cover.id, 'cover_big') : null;
+  return libretroUrl(platform, 'Named_Boxarts', cover); // legacy string => libretro boxart
+}
+// Secondary libretro art (snap/title) only applies to string-named covers;
+// IGDB covers carry a screenshots gallery in detail instead.
+export const snapUrl  = (platform, cover) => (typeof cover === 'string' ? libretroUrl(platform, 'Named_Snaps', cover) : null);
+export const titleUrl = (platform, cover) => (typeof cover === 'string' ? libretroUrl(platform, 'Named_Titles', cover) : null);
+export const screenshotUrl = (id) => igdbImg(id, '720p');
+export const ytThumb = (id) => `https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg`;
+export const ytEmbed = (id) => `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0`;
