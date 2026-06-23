@@ -53,10 +53,10 @@ async function igdb(endpoint, body, auth) {
 // --- bulk platform pull (cached to disk) -----------------------------------
 
 const BULK_FIELDS = [
-  'id', 'name', 'slug', 'category', 'first_release_date',
+  'id', 'name', 'slug', 'game_type', 'first_release_date',
   'total_rating', 'total_rating_count', 'aggregated_rating', 'aggregated_rating_count',
   'rating', 'rating_count', 'cover.image_id', 'alternative_names.name',
-  'summary', 'genres.name',
+  'summary', 'storyline', 'genres.name',
   'involved_companies.company.name', 'involved_companies.developer', 'involved_companies.publisher',
 ].join(',');
 
@@ -83,8 +83,9 @@ async function bulkPlatformGames(platformId, auth) {
 // --- name index + matching --------------------------------------------------
 
 // Prefer a real base game, then the most-rated, then the earliest release.
+// (IGDB renamed `category` -> `game_type` in 2024; game_type 0 == "main_game".)
 function better(a, b) {
-  const main = (g) => (g.category === 0 ? 1 : 0);
+  const main = (g) => (g.game_type === 0 ? 1 : 0);
   if (main(a) !== main(b)) return main(b) - main(a);
   if ((b.total_rating_count || 0) !== (a.total_rating_count || 0)) return (b.total_rating_count || 0) - (a.total_rating_count || 0);
   return (a.first_release_date || Infinity) - (b.first_release_date || Infinity);
@@ -134,17 +135,20 @@ function matchSpine(spine, games, index, platform, overrides) {
   return { result, stats: { frozen, fresh, overridden, total: spine.length, matched: result.size } };
 }
 
-// --- media (screenshots + trailers) for the matched set --------------------
+// --- media (screenshots + artworks + trailers) for the matched set ---------
+// Artworks (promo/key art) ride alongside screenshots to fatten the gallery —
+// retro titles often have only a handful of true screenshots on IGDB.
 
 async function fetchMedia(igdbIds, auth) {
-  const media = new Map(); // igdb id -> { screenshots: [imageId], videos: [youtubeId] }
+  const media = new Map(); // igdb id -> { screenshots, artworks, videos }
   for (let i = 0; i < igdbIds.length; i += 500) {
     const chunk = igdbIds.slice(i, i + 500);
     const rows = await igdb('games',
-      `fields id,screenshots.image_id,videos.video_id; where id = (${chunk.join(',')}); limit 500;`, auth);
+      `fields id,screenshots.image_id,artworks.image_id,videos.video_id; where id = (${chunk.join(',')}); limit 500;`, auth);
     for (const r of rows) {
       media.set(r.id, {
         screenshots: (r.screenshots || []).map((s) => s.image_id).filter(Boolean),
+        artworks: (r.artworks || []).map((a) => a.image_id).filter(Boolean),
         videos: (r.videos || []).map((v) => v.video_id).filter(Boolean),
       });
     }
@@ -153,6 +157,8 @@ async function fetchMedia(igdbIds, auth) {
   if (igdbIds.length) process.stdout.write('\n');
   return media;
 }
+
+const EMPTY_MEDIA = { screenshots: [], artworks: [], videos: [] };
 
 // --- field derivation -------------------------------------------------------
 
@@ -181,6 +187,6 @@ const igdbCover = (g) => (g && g.cover && g.cover.image_id ? g.cover.image_id : 
 const igdbUrl = (g) => (g && g.slug ? `https://www.igdb.com/games/${g.slug}` : null);
 
 module.exports = {
-  getToken, bulkPlatformGames, buildIndex, matchSpine, fetchMedia,
+  getToken, bulkPlatformGames, buildIndex, matchSpine, fetchMedia, EMPTY_MEDIA,
   deriveRatings, companies, igdbCover, igdbUrl, round,
 };

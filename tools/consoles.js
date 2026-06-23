@@ -12,7 +12,7 @@ module.exports = {
     label: 'Nintendo 64',
     wikidata: 'Q184839',
     libretro: 'libretro-thumbnails/Nintendo_-_Nintendo_64@master',
-    igdb: null, // prototype console; left on the free path so its output stays stable
+    igdb: { platformId: 4 }, // IGDB Nintendo 64 — adds covers/screenshots/trailers/ratings
   },
 
   xbox: {

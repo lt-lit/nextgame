@@ -27,13 +27,68 @@ const CONSOLES = require('./consoles');
 const { slug, uniq, loadCache, saveCache, mapPool } = require('./lib/util');
 const { queryWikidata, placeholderBucket } = require('./lib/wikidata');
 const { resolveArt } = require('./lib/libretro');
-const { resolveSummary } = require('./lib/wikipedia');
+const { resolveWiki } = require('./lib/wikipedia');
 const igdbLib = require('./lib/igdb');
 
 const ROOT = path.resolve(__dirname, '..');
 
 function loadOverrides() {
   try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'overrides.json'), 'utf8')); } catch { return {}; }
+}
+
+// ---- art + summary composition (source-tagged, with fallbacks) -------------
+
+// Cover, best source first: IGDB cover -> libretro boxart -> Wikipedia lead image.
+function buildCover(platform, g, m) {
+  const ig = igdbLib.igdbCover(m);
+  if (ig) return { src: 'igdb', id: ig };
+  if (g.art) return { src: 'libretro', platform, base: g.art, kind: 'Named_Boxarts' };
+  if (g.wikiImage) return { src: 'url', url: g.wikiImage };
+  return null;
+}
+
+// Screenshot gallery: IGDB screenshots, then IGDB artworks (promo/key art), then
+// the libretro in-game snap + title screen. De-duped, source-tagged, capped.
+function buildShots(platform, g, media) {
+  const out = [];
+  const seen = new Set();
+  const add = (key, rec) => { if (key && !seen.has(key)) { seen.add(key); out.push(rec); } };
+  for (const s of media.screenshots || []) add(`igdb:${s}`, { src: 'igdb', id: s });
+  for (const a of media.artworks || []) add(`igdb:${a}`, { src: 'igdb', id: a });
+  if (g.art) {
+    add(`snap:${g.art}`, { src: 'libretro', platform, base: g.art, kind: 'Named_Snaps' });
+    add(`title:${g.art}`, { src: 'libretro', platform, base: g.art, kind: 'Named_Titles' });
+  }
+  return out.slice(0, 12);
+}
+
+const prettify = (s) => String(s).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+const aan = (s) => (/^[aeiou]/i.test(String(s)) ? 'an' : 'a');
+
+// A "meaty" description: the longer of the Wikipedia lead and the IGDB summary,
+// then IGDB storyline, then a last-resort factual line composed from metadata so
+// every game carries *some* description.
+function buildSummary(platform, g, m, developer, publisher, year) {
+  const wiki = (g.summary || '').trim();
+  const igdbSum = (m && m.summary ? m.summary : '').trim();
+  const best = wiki.length >= igdbSum.length ? wiki : igdbSum;
+  if (best) return best;
+  const storyline = (m && m.storyline ? m.storyline : '').trim();
+  if (storyline) return storyline;
+  return composeSummary(platform, g, developer, publisher, year);
+}
+
+function composeSummary(platform, g, developer, publisher, year) {
+  const label = (CONSOLES[platform] && CONSOLES[platform].label) || platform;
+  const genre = (g.genres || []).map(prettify).join(', ');
+  const lead = genre ? `${g.title} is ${aan(genre)} ${genre} game for the ${label}` : `${g.title} is a game for the ${label}`;
+  const bits = [year ? `${lead}, released in ${year}.` : `${lead}.`];
+  if (developer && publisher && developer !== publisher) bits.push(`It was developed by ${developer} and published by ${publisher}.`);
+  else if (developer) bits.push(`It was developed by ${developer}.`);
+  else if (publisher) bits.push(`It was published by ${publisher}.`);
+  const modes = (g.modes || []).map(prettify).join(' and ');
+  if (modes) bits.push(`Supports ${modes} play.`);
+  return bits.join(' ');
 }
 
 async function main() {
@@ -80,64 +135,59 @@ async function main() {
     for (const g of games) {
       const m = result.get(g.id) || null;
       g.igdb = m;
-      g.igdbMedia = m ? (media.get(m.id) || { screenshots: [], videos: [] }) : { screenshots: [], videos: [] };
+      g.igdbMedia = m ? (media.get(m.id) || igdbLib.EMPTY_MEDIA) : igdbLib.EMPTY_MEDIA;
     }
   }
 
-  // 4) Wikipedia blurbs -----------------------------------------------------
-  console.log('4  Wikipedia: fetching summaries (cached, best-effort)...');
+  // 4) Wikipedia blurbs + lead image ---------------------------------------
+  // Gentle concurrency: the REST summary endpoint rate-limits hard. We only ask
+  // it for a lead image when the game still has no cover (no IGDB cover, no
+  // libretro boxart); the meaty intro comes from the action API, which doesn't.
+  console.log('4  Wikipedia: fetching intros + lead images (cached, best-effort)...');
   const wikiCache = loadCache(`wiki-${id}.json`);
-  await mapPool(games, 8, async (g) => { g.summary = await resolveSummary(g.wiki, wikiCache); });
+  await mapPool(games, 4, async (g) => {
+    const needImage = !igdbLib.igdbCover(g.igdb) && !g.art;
+    const w = await resolveWiki(g.wiki, wikiCache, needImage);
+    g.summary = w.summary;
+    g.wikiImage = w.image;
+  });
   saveCache(`wiki-${id}.json`, wikiCache);
 
   // 5) Emit -----------------------------------------------------------------
+  // One unified, source-tagged shape for every console. Cover and screenshots
+  // are polymorphic { src, ... } records the client resolves to URLs, so a single
+  // gallery can blend IGDB media, libretro snap/title art, and Wikipedia images.
   console.log('5  Emitting JSON...');
   const slim = [];
   const detail = {};
   for (const g of games) {
     const bucket = placeholderBucket(g.genres);
+    const m = g.igdb || null;
+    const media = g.igdbMedia || igdbLib.EMPTY_MEDIA;
+    const { rating, ratingCount, reviews } = igdbLib.deriveRatings(m, g.rating);
+    const year = g.year ?? (m && m.first_release_date ? new Date(m.first_release_date * 1000).getUTCFullYear() : null);
+    // IGDB tags developer-vs-publisher explicitly (Wikidata's order is arbitrary
+    // and lumps in port houses), so prefer it where present.
+    const developer = igdbLib.companies(m, 'developer')[0] || g.devs[0] || null;
+    const publisher = igdbLib.companies(m, 'publisher')[0] || g.pubs[0] || null;
 
-    if (cfg.igdb) {
-      // --- IGDB-enriched shape (IGDB primary for art + ratings) ---
-      const m = g.igdb;
-      const { rating, ratingCount, reviews } = igdbLib.deriveRatings(m, g.rating);
-      const year = g.year ?? (m && m.first_release_date ? new Date(m.first_release_date * 1000).getUTCFullYear() : null);
-      const cover = igdbLib.igdbCover(m) ? { src: 'igdb', id: igdbLib.igdbCover(m) } : null;
-      // IGDB tags developer-vs-publisher explicitly (Wikidata's order is arbitrary
-      // and lumps in port houses), so prefer it on this IGDB-primary console.
-      const developer = igdbLib.companies(m, 'developer')[0] || g.devs[0] || null;
-      const publisher = igdbLib.companies(m, 'publisher')[0] || g.pubs[0] || null;
-
-      slim.push({
-        id: g.id, title: g.title, platform: id, year,
-        genres: g.genres, modes: g.modes, rating, hltbBucket: bucket,
-        cover, tags: [], _hltbPlaceholder: true,
-      });
-      detail[g.id] = {
-        id: g.id, developer, publisher,
-        summary: g.summary || (m && m.summary) || null,
-        screenshots: g.igdbMedia.screenshots,
-        videos: g.igdbMedia.videos,
-        rating, ratingCount, reviews,
-        art: { igdbCover: igdbLib.igdbCover(m), libretro: g.art || null },
-        hltb: null,
-        links: { wikipedia: g.wiki || null, igdb: igdbLib.igdbUrl(m) },
-        igdbId: m ? m.id : null,
-        trivia: null,
-      };
-    } else {
-      // --- free-path shape (identical to the original prototype output) ---
-      slim.push({
-        id: g.id, title: g.title, platform: id, year: g.year,
-        genres: g.genres, modes: g.modes, rating: g.rating, hltbBucket: bucket,
-        cover: g.art, tags: [], _hltbPlaceholder: true,
-      });
-      detail[g.id] = {
-        id: g.id, developer: g.devs[0] || null, publisher: g.pubs[0] || null,
-        summary: g.summary || null, art: g.art, videos: [], ratingCount: null,
-        hltb: null, links: { wikipedia: g.wiki || null }, trivia: null,
-      };
-    }
+    slim.push({
+      id: g.id, title: g.title, platform: id, year,
+      genres: g.genres, modes: g.modes, rating, hltbBucket: bucket,
+      cover: buildCover(id, g, m), tags: [], _hltbPlaceholder: true,
+    });
+    detail[g.id] = {
+      id: g.id, developer, publisher,
+      summary: buildSummary(id, g, m, developer, publisher, year),
+      screenshots: buildShots(id, g, media),
+      videos: media.videos || [],
+      rating, ratingCount, reviews,
+      art: { igdbCover: igdbLib.igdbCover(m), libretro: g.art || null, wikipedia: g.wikiImage || null },
+      hltb: null,
+      links: { wikipedia: g.wiki || null, igdb: igdbLib.igdbUrl(m) },
+      igdbId: m ? m.id : null,
+      trivia: null,
+    };
   }
 
   fs.mkdirSync(path.join(ROOT, 'data/index'), { recursive: true });
@@ -162,7 +212,7 @@ function registerInManifest(cfg, count) {
   const i = (manifest.consoles || []).findIndex((c) => c.id === cfg.id);
   if (i >= 0) manifest.consoles[i] = entry; else (manifest.consoles = manifest.consoles || []).push(entry);
   manifest.generatedAt = new Date().toISOString();
-  manifest.note = manifest.note || 'Sources: Wikidata + libretro-thumbnails + Wikipedia + IGDB (build-time key).';
+  manifest.note = manifest.note || 'Sources: Wikidata (spine) + IGDB (covers/screenshots/artwork/trailers/ratings) + libretro-thumbnails (N64 box/snap/title) + Wikipedia (meaty descriptions + cover fallback).';
   manifest.overlays = manifest.overlays || [];
   fs.writeFileSync(p, JSON.stringify(manifest, null, 2) + '\n');
 }

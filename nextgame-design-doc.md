@@ -4,7 +4,7 @@
 > **Purpose:** A mobile-first, static personal webapp that picks something to play from entire console libraries, using extensive faceted filters plus a randomizer, and shows a rich profile for the chosen game.
 > **Audience for this doc:** Claude Code (implementation handoff). Decisions below are settled unless flagged in §13.
 >
-> **Status (evolved during prototyping):** A working **N64 prototype** is built and deployed on GitHub Pages. Data is generated from **free, mostly credential-less sources** (Wikidata + libretro-thumbnails + Wikipedia). The next step is **IGDB enrichment** (one free build-time key) for screenshot galleries, trailers, and broader ratings. Several original assumptions changed in contact with reality — this doc reflects the current vision; see §0 for the diff.
+> **Status (evolved during prototyping):** Two libraries — **N64** and **Xbox (original)** — are built and deployed on GitHub Pages, **both IGDB-enriched** (covers, screenshot + key-art galleries, trailers, per-source ratings) over a Wikidata spine, with meaty Wikipedia descriptions (full lead section) and libretro art (N64 box/snap/title). Cover and screenshot records are **source-tagged** and resolved to URLs client-side, so one gallery blends IGDB media, libretro snap/title, and ready-made URLs. Remaining gap: a true **≥5 screenshots for every game** is capped by IGDB's retro holdings (~⅓–½ of titles) — closing it needs a richer screenshot source (e.g. a MobyGames/TheGamesDB key), which the `{ src:'url', url }` record type already accommodates. Several original assumptions changed in contact with reality — this doc reflects the current vision; see §0 for the diff.
 
 ---
 
@@ -300,14 +300,15 @@ No sync. A clear **reset** affordance wipes all of the above.
 - [x] `localStorage` state (`ng.*`): active consoles, filters, history.
 - [x] Recency-weighted randomizer; explicit **veto**/blocklist; **rating filter** with unrated-passes-by-default.
 
-### Phase 1.5 — Data fill (NEXT)
-- [ ] **IGDB enrichment** (free build-time key): screenshot galleries, trailer video IDs, ratings + counts, cover/summary backups.
-- [ ] **libretro blobless-clone** art matching → ~95% covers.
+### Phase 1.5 — Data fill
+- [x] **IGDB enrichment** (free build-time key) on **both** consoles: screenshot + key-art galleries, trailer video IDs, ratings + counts, cover/summary backups.
+- [x] **Cover fill** → 94% (N64) / 98% (Xbox) via IGDB cover → libretro boxart → Wikipedia lead image.
+- [x] **Meaty descriptions** → 100% via Wikipedia full lead section → IGDB summary → metadata-composed fallback.
+- [x] **Reviews UI** (breakdown), **video facade** (tap-to-play), enriched screenshot carousel.
+- [x] **`overrides.json` + match cache** so IDs freeze and fetched/hand-fixed data survive re-runs.
+- [ ] **≥5 screenshots for every game** — capped by IGDB for retro; needs a richer source (MobyGames/TheGamesDB key) plugged into the `{ src:'url' }` record type.
 - [ ] **Wikipedia "Reception"** review scores → per-source breakdown + aggregate.
-- [ ] **Description backfill** (Wikipedia search fallback).
-- [ ] **Reviews UI** (breakdown), **video facade** (tap-to-play), enriched screenshot carousel.
 - [ ] **Social quotes** (Reddit) — exploratory, behind reachability.
-- [ ] **`overrides.json` + match cache** so IDs freeze and fetched/hand-fixed data survive re-runs.
 
 ### Phase 2 — Breadth & more features
 - [ ] Pipeline extended to **more consoles** (pressure-tests the two-tier/perf path).

@@ -60,15 +60,22 @@ function libretroUrl(platform, kind, base) {
   return repo && base ? `${CDN}/${repo}/${kind}/${encodeURIComponent(base)}.png` : null;
 }
 
-export function coverUrl(platform, cover) {
-  if (!cover) return null;
-  if (typeof cover === 'object') return cover.src === 'igdb' ? igdbImg(cover.id, 'cover_big') : null;
-  return libretroUrl(platform, 'Named_Boxarts', cover); // legacy string => libretro boxart
+// Resolve a source-tagged art record to a URL. Covers and screenshots share the
+// same polymorphic shape so a gallery can mix sources:
+//   { src:'igdb', id }                         -> IGDB image CDN
+//   { src:'libretro', platform, base, kind }   -> libretro-thumbnails via jsDelivr
+//   { src:'url', url }                          -> a ready-made URL (e.g. Wikipedia)
+// A bare string is treated as a legacy libretro boxart base name.
+function artUrl(rec, igdbSize, platform) {
+  if (!rec) return null;
+  if (typeof rec === 'string') return libretroUrl(platform, 'Named_Boxarts', rec);
+  if (rec.src === 'igdb') return igdbImg(rec.id, igdbSize);
+  if (rec.src === 'libretro') return libretroUrl(rec.platform || platform, rec.kind || 'Named_Boxarts', rec.base);
+  if (rec.src === 'url') return rec.url || null;
+  return null;
 }
-// Secondary libretro art (snap/title) only applies to string-named covers;
-// IGDB covers carry a screenshots gallery in detail instead.
-export const snapUrl  = (platform, cover) => (typeof cover === 'string' ? libretroUrl(platform, 'Named_Snaps', cover) : null);
-export const titleUrl = (platform, cover) => (typeof cover === 'string' ? libretroUrl(platform, 'Named_Titles', cover) : null);
-export const screenshotUrl = (id) => igdbImg(id, '720p');
+
+export const coverUrl = (platform, cover) => artUrl(cover, 'cover_big', platform);
+export const screenshotUrl = (shot) => artUrl(shot, '720p');
 export const ytThumb = (id) => `https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg`;
 export const ytEmbed = (id) => `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0`;

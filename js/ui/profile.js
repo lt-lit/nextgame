@@ -1,5 +1,5 @@
 // ui/profile.js — render the rolled game as the main full-screen view.
-import { coverUrl, snapUrl, titleUrl, screenshotUrl, ytThumb, ytEmbed, consoleInfo } from '../data.js';
+import { coverUrl, screenshotUrl, ytThumb, ytEmbed, consoleInfo } from '../data.js';
 import { pretty, TIME_LABELS, el } from '../util.js';
 
 const platformLabel = (p) => consoleInfo(p)?.label || p;
@@ -61,16 +61,13 @@ export function renderProfile(container, game, detail) {
   container.append(wrap);
 }
 
-// Ordered hero images: cover first, then the IGDB screenshot gallery (enriched
-// consoles) or the libretro snap/title variants (free path). Falsy URLs drop out.
+// Ordered hero images: cover first, then the screenshot gallery (source-tagged
+// records — IGDB shots/artwork, libretro snap/title, or ready URLs). Falsy URLs
+// (e.g. an art record that doesn't resolve) drop out.
 function mediaUrls(game, d) {
   const out = [coverUrl(game.platform, game.cover)];
   const shots = Array.isArray(d.screenshots) ? d.screenshots : [];
-  if (shots.length) {
-    for (const s of shots.slice(0, 8)) out.push(screenshotUrl(s));
-  } else {
-    out.push(snapUrl(game.platform, game.cover), titleUrl(game.platform, game.cover));
-  }
+  for (const s of shots.slice(0, 8)) out.push(screenshotUrl(s));
   return out.filter(Boolean);
 }
 
