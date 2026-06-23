@@ -14,6 +14,12 @@ export function renderProfile(container, game, detail) {
   const d = detail || {};
   const wrap = el('div', { class: 'profile' });
 
+  // --- title header (top of the page) ---
+  const sub = [platformLabel(game.platform), game.year].filter(Boolean).join(' · ');
+  const head = el('div', { class: 'pf-head' });
+  head.innerHTML = `<h2>${game.title}</h2><div class="sub">${sub}</div>`;
+  wrap.append(head);
+
   // --- videos: a 16:9 stage above the art (gameplay + trailers) ---
   const video = buildVideoSection(d);
   if (video) { _stopVideo = video.stop; wrap.append(video.node); }
@@ -25,8 +31,6 @@ export function renderProfile(container, game, detail) {
 
   // --- details ---
   const pad = el('div', { class: 'profile-pad' });
-  const sub = [platformLabel(game.platform), game.year].filter(Boolean).join(' · ');
-  pad.innerHTML = `<h2>${game.title}</h2><div class="sub">${sub}</div>`;
 
   const badges = el('div', { class: 'badges' });
   if (game.rating != null) {
