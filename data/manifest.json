@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-23T20:20:05.719Z",
+  "generatedAt": "2026-06-23T20:27:02.739Z",
   "note": "Sources: Wikidata (spine) + IGDB (covers/screenshots/artwork/trailers/ratings) + libretro-thumbnails (N64 box/snap/title) + Wikipedia (meaty descriptions + cover fallback). Both consoles IGDB-enriched.",
   "consoles": [
     {
