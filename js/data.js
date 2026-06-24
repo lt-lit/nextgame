@@ -78,4 +78,7 @@ function artUrl(rec, igdbSize, platform) {
 export const coverUrl = (platform, cover) => artUrl(cover, 'cover_big', platform);
 export const screenshotUrl = (shot) => artUrl(shot, '720p');
 export const ytThumb = (id) => `https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg`;
-export const ytEmbed = (id) => `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0`;
+// Privacy-preserving embed host; also passed to the IFrame Player API as `host`.
+export const YT_NOCOOKIE_HOST = 'https://www.youtube-nocookie.com';
+export const ytEmbed = (id, { autoplay = false, mute = false } = {}) =>
+  `${YT_NOCOOKIE_HOST}/embed/${encodeURIComponent(id)}?rel=0&playsinline=1&autoplay=${autoplay ? 1 : 0}${mute ? '&mute=1' : ''}`;

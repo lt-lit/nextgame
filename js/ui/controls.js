@@ -148,6 +148,9 @@ function renderDrawer() {
   // Roll behaviour
   body.append(facet('When rolling', toggleRow('Favor never-rolled', 'Bias the roll toward games you have not seen yet.', state.settings.favorNeverRolled, (on) => { state.settings.favorNeverRolled = on; save('settings'); })).node);
 
+  // Playback
+  body.append(facet('Playback', toggleRow('Autoplay videos', 'Start the first gameplay/trailer automatically (muted) when a game opens.', state.settings.autoplayVideos, (on) => { state.settings.autoplayVideos = on; save('settings'); })).node);
+
   updateCounts();
 }
 

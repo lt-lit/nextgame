@@ -1,15 +1,28 @@
 // ui/profile.js — render the rolled game as the main full-screen view.
-import { coverUrl, screenshotUrl, ytThumb, ytEmbed, consoleInfo } from '../data.js';
+import { coverUrl, screenshotUrl, consoleInfo } from '../data.js';
+import { buildVideoSection } from './videos.js';
 import { pretty, TIME_LABELS, el } from '../util.js';
 
 const platformLabel = (p) => consoleInfo(p)?.label || p;
 let _stopCarousel = null; // tears down the previous game's auto-advance timer
+let _stopVideo = null;    // tears down the previous game's video player
 
 export function renderProfile(container, game, detail) {
   if (_stopCarousel) { _stopCarousel(); _stopCarousel = null; }
+  if (_stopVideo) { _stopVideo(); _stopVideo = null; }
   container.innerHTML = '';
   const d = detail || {};
   const wrap = el('div', { class: 'profile' });
+
+  // --- title header (top of the page) ---
+  const sub = [platformLabel(game.platform), game.year].filter(Boolean).join(' · ');
+  const head = el('div', { class: 'pf-head' });
+  head.innerHTML = `<h2>${game.title}</h2><div class="sub">${sub}</div>`;
+  wrap.append(head);
+
+  // --- videos: a 16:9 stage above the art (gameplay + trailers) ---
+  const video = buildVideoSection(d);
+  if (video) { _stopVideo = video.stop; wrap.append(video.node); }
 
   // --- hero: art carousel (contained over a blurred backdrop) ---
   const hero = el('div', { class: 'pf-hero' });
@@ -18,8 +31,6 @@ export function renderProfile(container, game, detail) {
 
   // --- details ---
   const pad = el('div', { class: 'profile-pad' });
-  const sub = [platformLabel(game.platform), game.year].filter(Boolean).join(' · ');
-  pad.innerHTML = `<h2>${game.title}</h2><div class="sub">${sub}</div>`;
 
   const badges = el('div', { class: 'badges' });
   if (game.rating != null) {
@@ -41,9 +52,6 @@ export function renderProfile(container, game, detail) {
   if (d.developer) kv.push(`<div class="kv"><span class="k">Developer</span><span>${d.developer}</span></div>`);
   if (d.publisher) kv.push(`<div class="kv"><span class="k">Publisher</span><span>${d.publisher}</span></div>`);
   if (kv.length) pad.insertAdjacentHTML('beforeend', kv.join(''));
-
-  const trailers = trailersBlock(d);
-  if (trailers) pad.append(trailers);
 
   const links = el('div', { class: 'links' });
   const yt = `https://www.youtube.com/results?search_query=${encodeURIComponent(game.title + ' ' + platformLabel(game.platform) + ' gameplay')}`;
@@ -87,38 +95,6 @@ function reviewsBlock(d) {
     ));
   }
   return box;
-}
-
-// Click-to-load trailer facades: a thumbnail until tapped, then a youtube-nocookie
-// embed swaps in place. No third-party JS loads until the user opts in. Free path
-// has no videos, so this section simply doesn't render.
-function trailersBlock(d) {
-  const vids = Array.isArray(d.videos) ? d.videos.filter(Boolean) : [];
-  if (!vids.length) return null;
-  const box = el('div', { class: 'pf-section trailers' });
-  box.append(el('div', { class: 'pf-section-h' }, vids.length > 1 ? `Trailers · ${vids.length}` : 'Trailer'));
-  const row = el('div', { class: 'trailer-row' });
-  for (const id of vids.slice(0, 8)) row.append(trailerCard(id));
-  box.append(row);
-  return box;
-}
-
-function trailerCard(id) {
-  const card = el('button', { class: 'trailer', 'aria-label': 'Play trailer' });
-  const thumb = new Image();
-  thumb.className = 'trailer-thumb';
-  thumb.loading = 'lazy';
-  thumb.src = ytThumb(id);
-  thumb.onerror = () => thumb.remove(); // keep the dark card + play glyph if the thumb 404s
-  card.append(thumb, el('span', { class: 'trailer-play' }, '▶'));
-  card.addEventListener('click', () => {
-    card.replaceWith(el('iframe', {
-      class: 'trailer-frame', src: ytEmbed(id), title: 'Trailer', frameborder: '0',
-      allow: 'accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture',
-      allowfullscreen: '',
-    }));
-  }, { once: true });
-  return card;
 }
 
 // Art carousel with page dots + gentle auto-advance. Images that 404 drop out

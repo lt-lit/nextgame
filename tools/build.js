@@ -12,6 +12,7 @@
  *   - Wikidata SPARQL .... canonical list + genre/mode/dev/publisher/year + MC
  *   - libretro-thumbnails  No-Intro/Redump-named box/snap/title art (optional)
  *   - IGDB (Twitch OAuth)  art / ratings / screenshots / trailers (optional, key)
+ *   - YouTube (InnerTube)  one embeddable gameplay clip per game (optional, keyless)
  *   - Wikipedia REST ..... short profile blurb (best-effort)
  *
  * Credentials (IGDB only) come from env (TWITCH_CLIENT_ID/SECRET), never committed.
@@ -29,6 +30,7 @@ const { queryWikidata, placeholderBucket } = require('./lib/wikidata');
 const { resolveArt } = require('./lib/libretro');
 const { resolveWiki } = require('./lib/wikipedia');
 const igdbLib = require('./lib/igdb');
+const youtube = require('./lib/youtube');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -139,6 +141,37 @@ async function main() {
     }
   }
 
+  // 3b) Video assembly (optional, no key) ----------------------------------
+  // Type IGDB trailers, fill in an embeddable gameplay clip via keyless YouTube
+  // search, drop ids that definitely can't be embedded, and order the result.
+  // Cached + best-effort; the runtime player has its own embed backstop.
+  const igdbVideosOf = (g) => (g.igdbMedia && Array.isArray(g.igdbMedia.videos) ? g.igdbMedia.videos : []);
+  if (cfg.youtube && cfg.youtube.gameplay) {
+    console.log('3b YouTube: gameplay search + embeddability (no key, cached)...');
+    const gpCache = loadCache(`yt-${id}.json`); // spine id -> [{ id, type, title }]
+    await mapPool(games, 4, async (g) => {
+      if (!(g.id in gpCache)) gpCache[g.id] = await youtube.findGameplay(g.title, cfg.label, 1);
+    });
+    saveCache(`yt-${id}.json`, gpCache);
+
+    const embedCache = loadCache('yt-embeddable.json'); // video id -> bool (shared across consoles)
+    const candidateIds = new Set();
+    for (const g of games) {
+      for (const v of igdbVideosOf(g)) candidateIds.add(v.id);
+      for (const v of gpCache[g.id] || []) candidateIds.add(v.id);
+    }
+    const toCheck = [...candidateIds].filter((vid) => !(vid in embedCache));
+    if (toCheck.length) {
+      console.log(`     checking embeddability for ${toCheck.length} videos...`);
+      await mapPool(toCheck, 4, async (vid) => { embedCache[vid] = await youtube.isEmbeddable(vid); });
+      saveCache('yt-embeddable.json', embedCache);
+    }
+    for (const g of games) g.videos = youtube.mergeVideos(igdbVideosOf(g), gpCache[g.id] || [], embedCache);
+  } else {
+    // No YouTube fill-in: still type + order whatever IGDB provided.
+    for (const g of games) g.videos = youtube.mergeVideos(igdbVideosOf(g), [], null);
+  }
+
   // 4) Wikipedia blurbs + lead image ---------------------------------------
   // Gentle concurrency: the REST summary endpoint rate-limits hard. We only ask
   // it for a lead image when the game still has no cover (no IGDB cover, no
@@ -180,7 +213,7 @@ async function main() {
       id: g.id, developer, publisher,
       summary: buildSummary(id, g, m, developer, publisher, year),
       screenshots: buildShots(id, g, media),
-      videos: media.videos || [],
+      videos: g.videos || [],
       rating, ratingCount, reviews,
       art: { igdbCover: igdbLib.igdbCover(m), libretro: g.art || null, wikipedia: g.wikiImage || null },
       hltb: null,
@@ -212,7 +245,7 @@ function registerInManifest(cfg, count) {
   const i = (manifest.consoles || []).findIndex((c) => c.id === cfg.id);
   if (i >= 0) manifest.consoles[i] = entry; else (manifest.consoles = manifest.consoles || []).push(entry);
   manifest.generatedAt = new Date().toISOString();
-  manifest.note = manifest.note || 'Sources: Wikidata (spine) + IGDB (covers/screenshots/artwork/trailers/ratings) + libretro-thumbnails (N64 box/snap/title) + Wikipedia (meaty descriptions + cover fallback).';
+  manifest.note = manifest.note || 'Sources: Wikidata (spine) + IGDB (covers/screenshots/artwork/trailers/ratings) + YouTube InnerTube (keyless gameplay clips) + libretro-thumbnails (N64 box/snap/title) + Wikipedia (meaty descriptions + cover fallback).';
   manifest.overlays = manifest.overlays || [];
   fs.writeFileSync(p, JSON.stringify(manifest, null, 2) + '\n');
 }
@@ -224,17 +257,19 @@ function report(cfg, slim, detail, igdbStats) {
   const withCover = slim.filter((s) => s.cover).length;
   const withRating = slim.filter((s) => s.rating != null).length;
   const withSummary = Object.values(detail).filter((d) => d.summary).length;
+  const withVideos = Object.values(detail).filter((d) => d.videos && d.videos.length).length;
+  const withGameplay = Object.values(detail).filter((d) => (d.videos || []).some((v) => v.type === 'gameplay')).length;
   console.log('\n==== build summary ====');
   console.log(`games:         ${n}`);
   console.log(`with cover:    ${withCover}  (${pct(withCover, n)})`);
   console.log(`with rating:   ${withRating}  (${pct(withRating, n)})`);
   console.log(`with summary:  ${withSummary}  (${pct(withSummary, n)})`);
+  console.log(`with videos:   ${withVideos}  (${pct(withVideos, n)})`);
+  console.log(`with gameplay: ${withGameplay}  (${pct(withGameplay, n)})`);
   if (igdbStats) {
     const withShots = Object.values(detail).filter((d) => d.screenshots && d.screenshots.length).length;
-    const withVideos = Object.values(detail).filter((d) => d.videos && d.videos.length).length;
     console.log(`IGDB matched:  ${igdbStats.matched}  (${pct(igdbStats.matched, n)})`);
     console.log(`with shots:    ${withShots}  (${pct(withShots, n)})`);
-    console.log(`with trailers: ${withVideos}  (${pct(withVideos, n)})`);
   }
   console.log('=======================');
 }
